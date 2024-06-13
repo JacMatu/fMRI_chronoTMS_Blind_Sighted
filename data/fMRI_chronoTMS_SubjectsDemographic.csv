@@ -1,0 +1,41 @@
+Subject,Group,Age,Sex,Education,Reading Hand,Blindness onset,Blindness cause,Light Perception
+1,Blind,38,F,17,L,0,Mechanical damage,No
+2,Blind,46,F,12,L,0,RoP,No
+3,Blind,36,F,17,R,0,Corneal atrophy,Faint
+4,Blind,40,M,17,R,0,Optic nerve atrophy,Faint
+5,Blind,38,F,17,R,0,Retinoblastoma,No
+6,Blind,44,F,17,R,0,LCA,Faint
+7,Blind,38,M,17,L,0,RoP,"Yes, left eye"
+8,Blind,21,F,14,R,1,Retinoblastoma,No
+9,Blind,24,M,14,L,0,RoP,Faint
+10,Blind,31,F,17,R,0,Optic nerve atrophy,No
+11,Blind,35,M,14,L,0,Mechanical damage,No
+12,Blind,40,M,12,R,0,RoP,Faint
+13,Blind,35,F,12,L,0,RoP,"Faint, left eye"
+14,Blind,51,F,15,L,0,Unknown,No
+15,Blind,39,F,17,L,0,RoP,Faint until 12 y.o.
+16,Blind,47,F,17,R,0,CRS,No
+17,Blind,33,F,17,L,0,RoP,Faint
+18,Blind,26,F,17,R,0,CRS,No
+19,Blind,30,M,17,R,0,Unknown,Faint
+20,Blind,39,F,17,L,0,RoP,No
+1,Sighted,36,F,17,,,,
+2,Sighted,34,F,17,,,,
+3,Sighted,26,F,17,,,,
+4,Sighted,38,F,17,,,,
+5,Sighted,47,F,17,,,,
+6,Sighted,44,F,17,,,,
+7,Sighted,35,F,17,,,,
+8,Sighted,39,F,17,,,,
+9,Sighted,46,F,14,,,,
+10,Sighted,50,F,17,,,,
+11,Sighted,30,M,17,,,,
+12,Sighted,41,M,17,,,,
+13,Sighted,45,M,14,,,,
+14,Sighted,38,M,17,,,,
+15,Sighted,33,F,17,,,,
+16,Sighted,23,M,17,,,,
+17,Sighted,34,M,14,,,,
+18,Sighted,32,F,14,,,,
+19,Sighted,22,F,14,,,,
+20,Sighted,36,F,17,,,,
