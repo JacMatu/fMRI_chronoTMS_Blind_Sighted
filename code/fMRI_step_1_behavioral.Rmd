@@ -1,0 +1,355 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_behavioural"
+author: "Jacek Matuszewski"
+date: '2022-04-05'
+output: html_document
+---
+
+Load packages
+```{r}
+library(tidyverse)
+library(rstatix)
+library(stringr)
+library(ggplot2)
+```
+
+
+Basic demographic (Age, Education): plots and group comparisons [outdated]
+```{r Check basic demographics, echo = FALSE}
+#Load the data
+
+#This repo's dir
+dir <- '/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted'
+
+prelu_mri_demo <- read.csv(paste(dir, 'data', 'fMRI_chronoTMS_SubjectsDemographic.csv', sep = '/'))
+
+#Age t test
+t.test(prelu_mri_demo$Age[prelu_mri_demo$Group=="Blind"], prelu_mri_demo$Age[prelu_mri_demo$Group=="Sighted"])
+
+#Plot the age
+Age_plot <- boxplot(prelu_mri_demo$Age ~ prelu_mri_demo$Group, 
+                    data =
+                    prelu_mri_demo, 
+                    col = "white", 
+                    xlab = "Group", 
+                    ylab = "Age [Years]",
+                    main="Age distribution across groups")
+
+# Points
+stripchart(prelu_mri_demo$Age ~ prelu_mri_demo$Group, 
+           data = prelu_mri_demo,
+           method = "jitter",
+           pch = 19,
+           col = 2:4,
+           vertical = TRUE,
+           add = TRUE)
+
+
+
+
+
+#Education t test
+t.test(prelu_mri_demo$Education[prelu_mri_demo$Group=="Blind"], prelu_mri_demo$Education[prelu_mri_demo$Group=="Sighted"])
+ 
+ #Education plot
+ Education_plot <- boxplot(prelu_mri_demo$Education ~ prelu_mri_demo$Group, 
+                    data =
+                    prelu_mri_demo, 
+                    col = "white", 
+                    xlab = "Group", 
+                    ylab = "Education [Years]",
+                    main="Education distribution across groups")
+
+# Points
+stripchart(prelu_mri_demo$Education ~ prelu_mri_demo$Group, 
+           data = prelu_mri_demo,
+           method = "jitter",
+           pch = 19,
+           col = 2:4,
+           vertical = TRUE,
+           add = TRUE)
+ 
+```
+
+
+Reading speed (words / pseudowords) via Decoding Test
+```{r decoding test, echo = FALSE}
+library(tidyverse)
+library(rstatix)
+library(stringr)
+library(plotly)
+library(ez)
+library(RColorBrewer)
+library(orca)
+library(processx)
+library(corrr)
+library(cowplot)
+
+#mri_behav <- read_csv("/Users/jacekmatuszewski/Documents/Preludium_JM_roboczo/MRI/gpjm_mri_behv.csv")
+
+mri_behav <- read.csv(paste(dir, 'data', 'fMRI', 'MRI_behav.csv', sep ='/'))
+
+mri_behav_blind_A_B <- mri_behav %>% 
+    filter(Group == "Blind") %>% 
+    mutate(test_part = c(1, 2, 1, 2, 1,2, 1,2 ,1, 1, 2,1, 2, 2, 2, 1,1 ,1, 2,2))
+
+## ------SUMMARY STATS------
+
+reading_summary <- mri_behav %>% 
+        dplyr::select(subject, Group, speed_words, speed_pseudo) %>% 
+        group_by(Group) %>% 
+        summarise(mean_words = mean(speed_words), sd_words = sd(speed_words),
+                  mean_pseudo = mean(speed_pseudo), sd_pseudo = sd(speed_pseudo),
+                  max_words = max(speed_words),
+                  max_pseudo = max(speed_pseudo))
+
+## ------WIDE / LONG DATA FRAMES------
+
+reading_wide <- mri_behav %>% 
+        dplyr::select(subject, Group, speed_words, speed_pseudo) %>%
+        pivot_wider(names_from=Group, 
+                    #name_sep = "_",
+                    values_from = c(speed_words, speed_pseudo))
+
+reading_long <- mri_behav %>% 
+    dplyr::select(subject, group = Group, speed_words, speed_pseudo) %>% 
+    pivot_longer(cols = speed_words:speed_pseudo, names_to = "lexicality", values_to = "speed") %>% 
+    mutate(lexicality = sub("speed_", "", lexicality, ignore.case = TRUE)) %>%
+    mutate(lexicality = gsub("pseudo", "pseudowords", lexicality)) %>% 
+    mutate(lexicality = sub("(.)", "\\U\\1", lexicality, perl=TRUE))
+
+## ------ STATISTICS ------
+
+reading_speed_anova <-  ezANOVA(
+    data = reading_long,
+    dv = .(speed),
+    wid = .(subject),
+    within = .(lexicality),
+    between = .(group), 
+    type = 3, 
+    detailed = TRUE
+)
+reading_speed_anova[["ANOVA"]]
+
+reading_speed_post_hoc_1 <- reading_long %>% 
+  group_by(group) %>% 
+        t_test(speed~lexicality, paired = TRUE) %>% 
+        mutate(p_adj = p*4) %>% #Bonferoni BY HAND (2 x 2 model)
+        add_significance() %>% 
+        rename(grouping_variable=group)
+   
+reading_speed_post_hoc_2 <- reading_long %>% 
+    group_by(lexicality) %>% 
+        t_test(speed~group, paired = FALSE) %>% 
+        mutate(p_adj = p*4) %>% #Bonferoni BY HAND (2 x 2 model)
+        add_significance() %>% 
+        rename(grouping_variable=lexicality)
+
+reading_speed_post_hocs = rbind(reading_speed_post_hoc_1, reading_speed_post_hoc_2)
+rm(reading_speed_post_hoc_1, reading_speed_post_hoc_2)
+
+## ------PLOTS ------
+#Paired discrete scale used for TMS plots
+#1 = light blue, Blind A, 2 = dark blue, Blind B, 7 = light oragnge, Sighted A, 8 = dark orange, Sighted B
+paired_colors <- brewer.pal(n = 8, name = "Paired")
+dark_colors <- brewer.pal(n=2, name = "Dark2")
+light_colors <- brewer.pal(n=2, name = "Set2")
+
+
+# JITTER AND LINES
+dark_colors <- brewer.pal(n=3, name = "Dark2") 
+light_colors <- brewer.pal(n=3, name = "Pastel2") 
+
+plot_beh_reading_speed <- reading_long %>% 
+        ggplot(aes(x = lexicality, y = speed, 
+                   group = interaction(group, lexicality), 
+                   color = group)) +
+        geom_point(position = position_jitterdodge(jitter.width=0.15,
+                                                   dodge.width = 0.5),
+                   size = 2.5) +
+        stat_summary(fun = "mean", 
+                     geom = "crossbar", 
+                     position = position_dodge(width = 0.5),
+                     width = .45, 
+                     #color = rep(c(dark_colors[1], dark_colors[2]),2)) +
+                     color = 'black')+
+        stat_summary(fun.max = function(x) mean(x) + (sd(x)/sqrt(20)),
+                     fun.min = function(x) mean(x) - (sd(x)/sqrt(20)),
+                     geom = "errorbar",
+                     position = position_dodge(width = 0.5),
+                     width = .25,
+                     size = 0.8,
+                     #color = rep(c(dark_colors[1], dark_colors[2]),2),
+                     color = 'black',
+                     show.legend = FALSE) +
+        scale_color_manual(values = c(light_colors[1], light_colors[2])) +
+        scale_y_continuous(name = "Reading speed [items per minute]") +
+        scale_x_discrete(name = "Lexicality") +
+        labs(color="Group") +
+        theme_cowplot(font_size = 16, font_family = "Arial") +
+        theme(axis.line = element_line(colour = 'black', size = 1),
+              axis.ticks = element_line(colour = 'black', size = 1),
+              axis.text = element_text(face="bold"),
+              #legend.title = element_text(face = "bold"),
+              legend.position = "none")
+            
+
+
+```
+
+
+1-back fMRI task
+```{r 1-back task, echo = FALSE}
+library(tidyverse)
+library(rstatix)
+library(stringr)
+library(plotly)
+library(ez)
+library(RColorBrewer)
+library(processx)
+
+
+mri_behav <- reac.csv(paste(dir, 'data', 'fMRI', 'MRI_behav.csv', sep ='/'))
+
+
+## ------ LONG FORMAT FOR ANALYSES AND PLOTS ------
+task_long <- mri_behav %>% 
+    dplyr::select(-speed_words, -speed_pseudo, 
+           group = Group, 
+           Speech_Words = d_prime_speech_words,
+           Speech_Pseudowords = d_prime_speech_pseudowords,
+           Speech_Control = d_prime_speech_ctrl,
+           Reading_Words = d_prime_read_words,
+           Reading_Pseudowords = d_prime_read_pseudowords,
+           Reading_Control = d_prime_read_ctrl) %>% 
+    pivot_longer(cols = Speech_Words:Reading_Control, 
+                 names_sep = "_",
+                 names_to = c("modality", "condition"),
+                 values_to = "d_prime")
+
+# Descriptives
+task_summary <- task_long %>% group_by(group, modality, condition) %>% 
+    summarise(mean = mean(d_prime), 
+              sd = sd(d_prime), 
+              sem = sd(d_prime)/sqrt(20),
+              min = min(d_prime), 
+              max = max(d_prime))
+
+## ------- STATS: mixed ANOVA + post_hocs ------
+task_anova <- ezANOVA(
+     data = task_long,
+     dv = .(d_prime),
+     wid = .(subject),
+     within = .c(modality, condition),
+     between = .(group), 
+     type = 3, 
+     detailed = TRUE
+)
+task_anova[["ANOVA"]]
+
+#Within-subjects post-hocs 
+# Sighted subjects had 100% accuracy in speech words and pseudowords, so comparison = NAN
+task_post_hoc_1 <- task_long %>% 
+  group_by(group, modality) %>% 
+        t_test(d_prime~condition, paired = TRUE) %>% 
+        mutate(p_adj = p*12) %>% #N comparisons
+        rename(grouping_variable=group) %>% 
+        select(grouping_variable, modality, everything(), -p.adj, -p.adj.signif)
+
+#Between-subjects post-hocs
+task_post_hoc_2 <- task_long %>% 
+  group_by(modality,condition) %>% 
+        t_test(d_prime~group, paired = FALSE) %>% 
+        mutate(p_adj = p*6) %>% # N comparisons
+        rename(grouping_variable= condition) %>% 
+        select(grouping_variable, modality, everything())
+
+task_post_hocs = rbind(task_post_hoc_1, task_post_hoc_2)
+rm(task_post_hoc_1, task_post_hoc_2)
+
+
+## ------ PLOTS ------ 
+
+#Source the plot function
+source(paste(dir, 'code', 'functions_plots.R', sep = '/'))
+
+
+## POINts WITH MEAN
+plot_beh_fmri_task_point_read <- beh_task_points(task_long, mod = "Reading")
+plot_beh_fmri_task_point_speech <- beh_task_points(task_long, mod = "Speech")
+    
+```
+
+Decoding Test A vs B (Blind) 
+```{r}
+reading_summary_A_B <- mri_behav_blind_A_B %>% 
+        dplyr::select(subject, test_part, speed_words, speed_pseudo) %>% 
+        group_by(test_part) %>% 
+        summarise(mean_words = mean(speed_words), sd_words = sd(speed_words),
+                  mean_pseudo = mean(speed_pseudo), sd_pseudo = sd(speed_pseudo),
+                  max_words = max(speed_words),
+                  max_pseudo = max(speed_pseudo))
+
+#T TEST WORDS
+mri_behav_blind_A_B %>% 
+    t_test(speed_words~test_part, paired = FALSE)
+
+#T TEST PSEUDOWORDS
+mri_behav_blind_A_B %>% 
+    t_test(speed_pseudo~test_part, paired = FALSE)
+
+
+df.reading_long_A_B <- mri_behav_blind_A_B %>% 
+    dplyr::select(subject, test_part, speed_words, speed_pseudo) %>% 
+    pivot_longer(cols = speed_words:speed_pseudo, names_to = "lexicality", values_to = "speed") %>% 
+    mutate(lexicality = sub("speed_", "", lexicality, ignore.case = TRUE)) %>%
+    mutate(lexicality = gsub("pseudo", "pseudowords", lexicality)) %>% 
+    mutate(lexicality = sub("(.)", "\\U\\1", lexicality, perl=TRUE)) %>% 
+    mutate(test_part = recode(test_part, "1" = "A", "2" = "B"))
+
+
+```
+
+Plot decoding test A vs B
+```{r}
+
+dark_colors <- brewer.pal(n=3, name = "Dark2") 
+light_colors <- brewer.pal(n=3, name = "Pastel2") 
+
+plot_PL_beh_reading_speed_A_B <- df.reading_long_A_B %>% 
+        ggplot(aes(x = lexicality, y = speed, 
+                   group = interaction(test_part, lexicality), 
+                   color = test_part)) +
+        geom_point(position = position_jitterdodge(jitter.width=0.15,
+                                                   dodge.width = 0.5),
+                   size = 3.5) +
+        stat_summary(fun = "mean", 
+                     geom = "crossbar", 
+                     position = position_dodge(width = 0.5),
+                     width = .45, 
+                    # size = 1, #thicker?
+                     #color = rep(c(dark_colors[1], dark_colors[2]),2)) +
+                     color = 'black')+
+        stat_summary(fun.max = function(x) mean(x) + (sd(x)/sqrt(20)),
+                     fun.min = function(x) mean(x) - (sd(x)/sqrt(20)),
+                     geom = "errorbar",
+                     position = position_dodge(width = 0.5),
+                     width = .25,
+                     size = 0.8,
+                     #color = rep(c(dark_colors[1], dark_colors[2]),2),
+                     color = 'black',
+                     show.legend = FALSE) +
+        scale_color_manual(values = c(dark_colors[1], light_colors[1])) +
+        scale_y_continuous(name = "Liczba bodźców na minutę") +
+        scale_x_discrete(name = "Leksykalność", 
+                         labels = c("Pseudosłowa", "Słowa")) +
+        labs(color="test_part") +
+        theme_cowplot(font_size = 16, font_family = "Arial") +
+        theme(axis.line = element_line(colour = 'black', size = 1),
+              axis.ticks = element_line(colour = 'black', size = 1),
+              axis.text = element_text(face="bold"),
+              #legend.title = element_text(face = "bold"),
+              legend.position = "none")
+
+```
+

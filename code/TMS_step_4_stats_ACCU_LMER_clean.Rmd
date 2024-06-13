@@ -1,0 +1,499 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_TMS_Accuracy"
+author: "Jacek Matuszewski"
+date: '2022-08-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages, echo=, message=FALSE, warning=FALSE}
+#library(plotly)
+library(tidyverse)
+#library(ggsignif)
+library(lme4)
+library(lmerTest)
+library(jtools)
+library(ez)
+library(tidyverse)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(patchwork)
+library(nlme)
+library(multcomp)
+library(emmeans)
+```
+
+Load the data frames and create Data Frames for linear models (RT & Accuracy)
+
+```{r Load preprocessed data, echo=}
+#Requires running TMS_MNI_and_preproc.Rmd first
+rm(list=ls())
+
+dir <- '/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted'
+load(paste(dir, 'data', 'TMS', 'TMS_preprocessed_data.RData', sep = '/'))
+
+## Prepare DFs for GLMMs: raw data withh all answers (ACCU) and correct only (RT)
+
+## ---------- Raw data, bound across groups (all trials) ----------
+raw_data_all <- rbind(blind_raw_data, sighted_raw_data) %>% 
+     filter(Subject != "Sighted_11") %>% 
+     mutate(Accuracy_01 = recode (Accuracy, 
+                              "hit" = 1, 
+                              "incorrect" = 0,
+                              "miss" = 0))
+
+
+#Count for descriptive purposes (hits / misses occurences)
+#raw_data_all %>% count(Accuracy)
+
+#raw_data_corr_incorr <- raw_data_all %>% filter(Accuracy != "miss")  
+     
+ 
+
+## ---------- ERROR RATES: "RAW" ACCURACIES ---------- 
+
+# For "raw" plots and interpretable values (vs log odds ratio)
+
+ 
+accu_data_all <- rbind(blind_accuracy_data, sighted_accuracy_data) %>%
+    filter(Subject != "Sighted_11") %>%
+    mutate(Error_rate = 1 - Accuracy_score)
+
+
+accu_tms_effects <- accu_data_all %>%
+      mutate(Error_rate = (1 - Accuracy_score) * 100) %>%
+      group_by(Subject, Site, Modality) %>%
+      #compute TMS effects for each subject * condition
+      mutate(Accuracy_TMS_effect = Accuracy_score-Accuracy_score[TW == "ctrlTMS"]) %>%
+      mutate(Error_rate_TMS_effect = Error_rate-Error_rate[TW == "ctrlTMS"]) %>%
+      filter(TW != "ctrlTMS")
+
+# Create summaries with % (* 100)
+raw_accu_tms_summaries <- accu_tms_effects %>%
+    group_by(Group, Site, Modality, TW) %>%
+    dplyr::summarise(mean = mean(Accuracy_TMS_effect) * 100,
+                     sem = (sd(Accuracy_TMS_effect)/sqrt(25)) * 100)
+
+rm(accu_tms_effects, accu_data_all)
+
+#smol clean-up
+rm(blind_accuracy_data, sighted_accuracy_data,
+   blind_rt_data, sighted_rt_data,
+   blind_raw_data, sighted_raw_data, 
+   tms_preproc, blind_percent_trimmed, 
+   sighted_percent_trimmed)
+
+```
+
+
+ACCURACY: GLMMs (BINOMIAL):
+
+GROUP x SITE x TW x MODALITY: MODEL
+
+```{r ACCURACY, include = FALSE}
+
+#binomial glmer with binary accuracy: NULL MODEL (intercept only)
+accu.glm.null <- glmer(Accuracy_01 ~ (1|Subject), 
+                       data = raw_data_all, 
+                       family = "binomial",
+                       nAGQ = 0, 
+                       control = glmerControl(optimizer = "nloptwrap"))
+
+
+#binomial glmer with binary accuracy
+accu.glm.full <- glmer(Accuracy_01 ~ Group * Modality * Site * TW * Lex 
+                       + (1|Letters) + (1|Subject),
+                  data = raw_data_all, 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+#Compare to null model
+anova(accu.glm.null, accu.glm.full)
+
+#ANOVA WALD Z on the main model
+accu.glm.full.anova <- car::Anova(accu.glm.full, type = 3)
+
+## Model summary
+summary(accu.glm.full)
+
+
+# ##Plot inspections (Model diagnostics)
+# plot(accu.glm)
+# # normality of residuals
+#  qqnorm(residuals(accu.glm))
+#  qqline(residuals(accu.glm))
+# # normality of random effect
+#  qqnorm(ranef(accu.glm)$Subject[,1])
+#  qqline(ranef(accu.glm)$Subject[,1])
+# # random effects distributions
+# library(lattice)
+# dotplot(ranef(accu.glm,condVar=TRUE))
+
+# to look at global effects of factors (anova-like)
+# satterthwaite degrees of freedom approximation methods
+
+
+# R SQUARED FOR THE MODEL - DOESN'T MAKE MUCH SENSE WITH THIS VARIANCE?
+
+#library("piecewiseSEM")
+#rsquared(accu.glm.full, method = NULL)
+
+
+```
+
+GROUP x SITE x TW x MODALITY: EMMEANS EXTRACTION
+
+```{r}
+# Get the Estimated Marginal Means for significant main effects and interactions:
+
+
+
+# INTERACTIONS
+accu.glm.full.EMMs.group.mod.TW.inter <- emmeans(accu.glm.full, 
+                                                 list(pairwise ~Group*Modality*TW), 
+                                                 adjust = "none")
+
+accu.glm.full.EMMs.group.mod.TW.inter.list <-list(
+    "emmeans" = data.frame(summary(accu.glm.full.EMMs.group.mod.TW.inter[["emmeans of Group, Modality, TW"]])),
+    "comp" = data.frame(summary(accu.glm.full.EMMs.group.mod.TW.inter[["pairwise differences of Group, Modality, TW"]])))
+
+accu.glm.full.EMMs.group.mod.site.inter <- emmeans(accu.glm.full, 
+                                                 list(pairwise ~Group*Modality*Site), 
+                                                 adjust = "none")
+
+accu.glm.full.EMMs.group.mod.site.inter.list <-list(
+    "emmeans" = data.frame(summary(accu.glm.full.EMMs.group.mod.site.inter[["emmeans of Group, Modality, Site"]])),
+    "comp" = data.frame(summary(accu.glm.full.EMMs.group.mod.site.inter[["pairwise differences of Group, Modality, Site"]])))
+
+##Exploratory: 4-way-interaction
+accu.glm.full.EMMs.4way.inter <- emmeans(accu.glm.full, 
+                                                 list(pairwise ~Group*Modality*Site*TW), 
+                                                 adjust = "none")
+
+accu.glm.full.EMMs.4way.inter.list <-list(
+    "emmeans" = data.frame(summary(accu.glm.full.EMMs.4way.inter[["emmeans of Group, Modality, Site, TW"]])),
+    "comp" = data.frame(summary(accu.glm.full.EMMs.4way.inter[["pairwise differences of Group, Modality, Site, TW"]])))
+
+
+## AGGREGATE EVERYTHING INTO A LIST & CLEAN UP
+
+accu.glm.full.SIG_EMMs <- list(
+                          "Group:Modality:TW" = 
+                              accu.glm.full.EMMs.group.mod.TW.inter.list, 
+                          "Group:Modality:Site" = 
+                              accu.glm.full.EMMs.group.mod.site.inter.list, 
+                          "Exploratory 4-way Interaction" = 
+                              accu.glm.full.EMMs.4way.inter.list)
+
+rm(list = ls(pattern = "^accu.glm.full.EMMs_*"))
+```
+
+Accuracy: group-specific SITE x TW x MODALITY MODELs
+
+```{r}
+
+## ---------- BLIND: SPECIFY THE MODEL & DIAGNOSTICS ----------
+
+accu.glm.blind <- raw_data_all %>% 
+    filter(Group == "Blind") %>% 
+    glmer(Accuracy_01 ~ Modality * Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+accu.glm.blind.anova <- car::Anova(accu.glm.blind, type = 3)
+summary(accu.glm.blind)
+
+
+## ---------- SIGHTED: SPECIFY THE MODEL & DIAGNOSTICS ----------
+
+
+accu.glm.sighted <- raw_data_all %>% 
+    filter(Group == "Sighted") %>% 
+    glmer(Accuracy_01 ~Modality * Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+accu.glm.sighted.anova <- car::Anova(accu.glm.sighted, type = 3)
+summary(accu.glm.sighted)
+
+```
+
+Accuracy: group-and-modality specific models (NOT JUSTIFIED BY INTERACTION ANALYSES)
+
+```{r}
+accu.glm.blind.read <-    raw_data_all %>% 
+    filter(Group == "Blind" & Modality == "read") %>% 
+    glmer(Accuracy_01 ~ Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+accu.glm.blind.speech <-    raw_data_all %>% 
+    filter(Group == "Blind" & Modality == "speech") %>% 
+    glmer(Accuracy_01 ~ Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+accu.glm.sighted.read <-    raw_data_all %>% 
+    filter(Group == "Sighted" & Modality == "read") %>% 
+    glmer(Accuracy_01 ~ Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+
+accu.glm.sighted.speech <-    raw_data_all %>% 
+    filter(Group == "Sighted" & Modality == "speech") %>% 
+    glmer(Accuracy_01 ~ Site * TW * Lex + (1|Subject) + (1|Letters),
+                  data = ., 
+                  family = "binomial", 
+                  nAGQ = 0, 
+                  control = glmerControl(optimizer = "nloptwrap"))
+
+```
+
+ANOVAS (Group-modality-specific GLMs)
+
+```{r}
+car::Anova(accu.glm.blind.read, type = 3) # NOTHING SIGNIFICANT
+car::Anova(accu.glm.blind.speech, type = 3) #TRENING SITE & TW
+car::Anova(accu.glm.sighted.read, type = 3) #MAIN EFFECT OF LEXICALITY
+car::Anova(accu.glm.sighted.speech, type = 3) # NOTHING SIGNIFICANT
+```
+
+Accuracy: EMMEANS EXTRACTION
+
+```{r}
+accu.glm.blind.read.emmeans <-  data.frame(summary(emmeans(accu.glm.blind.read,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                  adjust = "none")$contrast))
+
+accu.glm.blind.speech.emmeans <-  data.frame(summary(emmeans(accu.glm.blind.speech,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                  adjust = "none")$contrast))
+
+accu.glm.sighted.read.emmeans <-  data.frame(summary(emmeans(accu.glm.sighted.read,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                  adjust = "none")$contrast))
+
+accu.glm.sighted.speech.emmeans <-  data.frame(summary(emmeans(accu.glm.sighted.speech,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                  adjust = "none")$contrast))
+```
+
+JOIN THE EMMEANS INTO A SINGLE DF
+
+```{r}
+#NOTHING IS SIGNIFICANT, ONLY NEEDED FOR BREWITY OF REPORTING 
+accu_time_contrasts_df <- 
+        rbind(accu.glm.blind.read.emmeans, accu.glm.blind.speech.emmeans,
+              accu.glm.sighted.read.emmeans, accu.glm.sighted.speech.emmeans) %>% 
+        mutate(Group = rep(c("Blind", "Sighted"), each = 24)) %>%
+        mutate(Modality = rep(c("read", "speech"), each = 12, times = 2)) %>% 
+        mutate(estimate_inv = estimate * (-1)) %>% 
+        mutate(p_adj24 = p.value*24) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj24 < 0.001, "***", 
+                      ifelse(p_adj24 < 0.01, "**", 
+                             ifelse(p_adj24 < 0.05, "*",
+                                    ifelse(p_adj24<0.1, "t", "ns"))))) %>% 
+        dplyr::select(Group, Modality, Site, contrast, estimate_inv, everything())
+```
+
+Accuracy: LEXICALITY EFFECTS (MAIN EFFECT OF LEX)
+
+```{r}
+me_lex_bl.rd <- data.frame(summary(emmeans(accu.glm.blind.read, ~Lex)))
+me_lex_bl.sp <- data.frame(summary(emmeans(accu.glm.blind.speech, ~Lex)))
+me_lex_si.rd <- data.frame(summary(emmeans(accu.glm.sighted.read, ~Lex)))
+me_lex_si.sp <- data.frame(summary(emmeans(accu.glm.sighted.speech, ~Lex)))
+
+
+#Gather main effects (emmeans) to plot beside temporal patters
+df.accu.glm.lex_me <- rbind(me_lex_bl.rd, me_lex_bl.sp, 
+                           me_lex_si.rd, me_lex_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 4)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 2, times = 2)) %>% 
+    dplyr::select(Group, Modality, everything())
+
+
+#COMPARE LEXICALITY (MAIN EFFECT)
+
+comp_accu_lex_bl.rd <- data.frame(summary(emmeans(accu.glm.blind.read,
+                                             pairwise ~Lex)$contrast))
+comp_accu_lex_bl.sp <- data.frame(summary(emmeans(accu.glm.blind.speech,
+                                             pairwise ~Lex)$contrast))
+comp_accu_lex_si.rd <- data.frame(summary(emmeans(accu.glm.sighted.read,
+                                             pairwise ~Lex)$contrast))
+comp_accu_lex_si.sp <- data.frame(summary(emmeans(accu.glm.sighted.speech,
+                                             pairwise ~Lex)$contrast))
+
+
+# DF with comparisons of main effects - were they significant in the models? 
+lex_accu_me_comp_df <- rbind(comp_accu_lex_bl.rd, comp_accu_lex_bl.sp, 
+                           comp_accu_lex_si.rd, comp_accu_lex_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 2)) %>% 
+    mutate(Modality = rep(c("read", "speech"), times = 2)) %>% 
+    dplyr::select(Group, Modality, everything())
+
+
+rm(list = ls(pattern = "^me_lex*"))
+rm(list = ls(pattern = "^comp_accu_lex*"))
+```
+
+Accuracy: LEXICALITY EFFECTS (ACROSS TIME)
+
+```{r}
+
+lex.accu.blind.read.emmeans <-  data.frame(summary(emmeans(accu.glm.blind.read,
+                                                  pairwise ~Lex*Site*TW,
+                                                  by = c("Site", "Lex"),
+                                                  adjust = "none")$contrast))
+
+lex.accu.blind.speech.emmeans <-  data.frame(summary(emmeans(accu.glm.blind.speech,
+                                                  pairwise ~Lex*Site*TW,
+                                                  by = c("Site", "Lex"),
+                                                  adjust = "none")$contrast))
+
+lex.accu.sighted.read.emmeans <-  data.frame(summary(emmeans(accu.glm.sighted.read,
+                                                  pairwise ~Lex*Site*TW,
+                                                  by = c("Site", "Lex"),
+                                                  adjust = "none")$contrast))
+
+lex.accu.sighted.speech.emmeans <-  data.frame(summary(emmeans(accu.glm.sighted.speech,
+                                                  pairwise ~Lex*Site*TW,
+                                                  by = c("Site", "Lex"),
+                                                  adjust = "none")$contrast))
+
+#JOIN INTO LEX TIME DF 
+df.lex_accu_time_contrasts <- rbind(lex.accu.blind.read.emmeans, 
+                                    lex.accu.blind.speech.emmeans,
+                                    lex.accu.sighted.read.emmeans,
+                                    lex.accu.sighted.speech.emmeans) %>% 
+        mutate(Group = rep(c("Blind", "Sighted"), each = 48)) %>%
+        mutate(Modality = rep(c("read", "speech"), each = 24, times = 2)) %>% 
+        mutate(estimate_inv = estimate * (-1)) %>% 
+        mutate(p_adj48 = p.value*48) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj48 < 0.001, "***", 
+                      ifelse(p_adj48 < 0.01, "**", 
+                             ifelse(p_adj48 < 0.05, "*",
+                                    ifelse(p_adj48<0.1, "t", "ns"))))) %>% 
+        dplyr::select(Group, Modality, Site, contrast, estimate_inv, everything())
+    
+```
+
+LEXICALITY: words vs pseudowords [TMS effects magnitude]
+Endproduct: accu_lex_word_pseudo_comp_df
+```{r}
+# COMPARE THE MAGNITUDE OF TMS EFFECTS (TW - CTRL TW between words and pseudowords in each TW/SITE, eg. EVC EARLY TMS - CTRL TMS: WORDS - PSEUDO)
+
+# Try to extract pairs of TW - CONTROL TW [words vs pseudo]
+
+
+# Extract only relevant rows
+accu_word_pseudo_bl.rd <- avg_comparisons(accu.glm.blind.read,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+accu_word_pseudo_bl.sp <- avg_comparisons(accu.glm.blind.speech,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+accu_word_pseudo_si.rd <- avg_comparisons(accu.glm.sighted.read,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+accu_word_pseudo_si.sp <- avg_comparisons(accu.glm.sighted.speech,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+# JOIN THE DFs 
+df.accu.lex_word_pseudo_comp <- rbind(accu_word_pseudo_bl.rd, accu_word_pseudo_bl.sp, 
+                            accu_word_pseudo_si.rd, accu_word_pseudo_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 12)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 6, times = 2)) %>% 
+    mutate(Site = rep(c("EVC", "VWFA"), each = 3, times = 4)) %>% 
+    mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"), times = 8)) %>% 
+    mutate(p_adj48 = p.value*48) %>% 
+    mutate(p_signif = 
+                   ifelse(p_adj48 < 0.001, "***", 
+                      ifelse(p_adj48 < 0.01, "**", 
+                             ifelse(p_adj48 < 0.05, "*",
+                                    ifelse(p_adj48<0.1, "t", "ns"))))) %>% 
+    dplyr::select(Group, Modality, Site, TW, everything())
+
+rm(list = ls(pattern = "^accu_word_pseudo*"))
+
+```
+
+
+ACCU PLOTS (MAIN)
+
+```{r}
+
+#Prepare DF for plotting 
+
+df.accu.glm.tms.effects <- accu_time_contrasts_df %>% 
+    filter(grepl("ctrlTMS", contrast)) %>% 
+    mutate(TW = gsub("ctrlTMS - ", "", contrast)) %>% 
+    mutate(TW = factor(TW, levels = c("earlyTMS", "midTMS", "lateTMS"))) %>% 
+    dplyr::select(Group, Site, Modality, TW, everything()) %>% 
+    dplyr::select(-c(estimate, contrast)) %>% 
+    # copy plotted variables with names compatibile with plotting function (lazyness)
+    mutate(estimate = estimate_inv) 
+    
+```
+
+LEXICALITY PLOT DF
+
+```{r}
+
+#Prepare DF with TMS effects across lexicalities
+
+df.accu.glm.lex_time_tms_effects <- df.lex_accu_time_contrasts %>% 
+    filter(grepl("ctrlTMS", contrast)) %>% 
+    mutate(TW = gsub("ctrlTMS - ", "", contrast)) %>% 
+    mutate(TW = factor(TW, levels = c("earlyTMS", "midTMS", "lateTMS"))) %>% 
+    mutate(Lex = factor(Lex, levels = c("word", "pseudo"))) %>% 
+    dplyr::select(Group, Site, Modality, TW, Lex, everything()) %>% 
+    dplyr::select(-c(estimate, contrast)) %>% 
+    # copy plotted variables with names compatibile with plotting function (lazyness)
+    mutate(estimate = estimate_inv)
+
+
+```
+
+---------- SAVE DATA FOR PLOTS ----------
+
+GLM plots require following data frames: 
+- df.accu.glm.tms.effects
+- df.accu.glm.lex_time_tms_effects
+- df.accu.glm.lex_me
+
+```{r}
+
+save(df.accu.glm.tms.effects, df.accu.glm.lex_time_tms_effects, df.accu.glm.lex_me, 
+     file = paste(dir, 'data', 'TMS','GLM_ACCU_plot_data.RData', sep = '/'))
+```

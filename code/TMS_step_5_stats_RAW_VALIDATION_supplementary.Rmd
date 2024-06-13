@@ -1,0 +1,392 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_TMS_RAW"
+author: "Jacek Matuszewski"
+date: '2022-08-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages, echo=, message=FALSE, warning=FALSE}
+#library(plotly)
+library(tidyverse)
+library(ggsignif)
+library(lme4)
+library(lmerTest)
+library(jtools)
+library(ez)
+library(tidyverse)
+library(plotly)
+library(stringr)
+library(cowplot)
+library(RColorBrewer)
+library(patchwork)
+library(ggpubr)
+library(nlme)
+library(multcomp)
+```
+
+Load the data frames and create TMS effects (summary DFs) for RTs
+
+```{r Load preprocessed data, echo=}
+#Requires running TMS_MNI_and_preproc.Rmd first
+#rm(list=ls())
+
+load(paste(dir, 'data', 'TMS', 'TMS_preprocessed_data.RData', sep = '/'))
+
+raw_data_all <- rbind(blind_raw_data, sighted_raw_data)
+raw_data_correct <- raw_data_all %>% 
+    filter(Accuracy == "hit") 
+
+## ---------- RT: MAIN DATA FRAMES ---------
+rt_data_all <- rbind(blind_rt_data, sighted_rt_data) %>% 
+    filter(Subject != "Sighted_11")
+
+## TMS effects for each subject!  
+ rt_tms_effects <- rt_data_all %>% 
+     filter(Subject != "Sighted_11") %>% 
+     group_by(Subject, Site, Modality) %>% 
+     #compute TMS effects for each subject * condition
+     mutate(RT_median_TMS_effect = RT_median-RT_median[TW=="ctrlTMS"]) %>%
+     mutate(RT_mean_TMS_effect = RT_mean-RT_mean[TW=="ctrlTMS"]) %>%
+     filter(TW != "ctrlTMS") %>%
+     dplyr::select(Subject, Group, Site, Modality, TW, 
+                   RT_median_TMS_effect, RT_mean_TMS_effect)
+    
+ rt_tms_effect_raw_summary <- rt_tms_effects %>% 
+     group_by(Group, Site, Modality, TW) %>% 
+     dplyr::summarize(mean_median = mean(RT_median_TMS_effect), 
+                      #sem_median = sd(RT_median_TMS_effect)/sqrt(26),
+                      mean_mean = mean(RT_mean_TMS_effect))
+ 
+ 
+## ---------- RT: LEXICALITY EFFECTS ---------
+
+#Prepare the DATA FRAMES
+rt_data_lex <- raw_data_all %>% 
+    filter(Accuracy == "hit" & Subject != "Sighted_11") %>% 
+    mutate(Lex = factor(Lex, levels = c("word", "pseudo"))) %>% 
+    group_by(Subject, Group, Site, Modality, TW, Lex) %>% 
+    summarise(RT_median = median(RT),
+              RT_log_median = log(median(RT)))
+
+## TMS effects for each subject!  
+ rt_tms_effects_lex <- rt_data_lex %>% 
+     group_by(Subject, Site, Modality, Lex) %>% 
+     #compute TMS effects for each subject * condition
+     mutate(RT_median_TMS_effect = RT_median-RT_median[TW=="ctrlTMS"]) %>%
+     mutate(RT_log_median_TMS_effect = RT_log_median-RT_log_median[TW=="ctrlTMS"]) %>%
+     filter(TW != "ctrlTMS") %>%
+     dplyr::select(Subject, Group, Site, Modality, TW, Lex, 
+                   RT_median_TMS_effect, RT_log_median_TMS_effect)
+
+ #Summaries for median RTs
+ rt_tms_effect_lex_summary <- rt_tms_effects_lex %>% 
+     group_by(Group, Site, Modality, TW, Lex) %>% 
+     dplyr::summarize(mean = mean(RT_median_TMS_effect), 
+                      sem = sd(RT_median_TMS_effect)/sqrt(26))
+
+#smol clean-up
+rm(blind_accuracy_data, sighted_accuracy_data,
+   blind_rt_data, sighted_rt_data,
+   blind_raw_data, sighted_raw_data, raw_data_all)
+
+#rm(raw_data_all)
+```
+
+Normality of distributions in cells [RT_log_median]
+
+```{r}
+rt_data_all %>% ungroup() %>% group_by(Group, Site, Modality, TW) %>% shapiro_test(RT_log_median)
+```
+
+RT ANOVAS (BIG):
+
+```{r}
+
+#ANOVAS
+
+ ANOVA_RT_median <- rt_data_all %>% 
+      ezANOVA(
+      data = ., 
+      dv = .(RT_median), 
+      within = .c(Site, TW, Modality), 
+      wid = .(Subject),
+      between = .(Group)
+  )
+
+ ANOVA_RT_mean <- rt_data_all %>% 
+      ezANOVA(
+      data = ., 
+      dv = .(RT_mean), 
+      within = .c(Site, TW, Modality), 
+      wid = .(Subject),
+      between = .(Group)
+  )
+
+```
+
+RT ANOVAS (GROUP-SPECIFIC)
+
+```{r}
+ANOVA_RT_median_blind <- rt_data_all %>% 
+    filter(Group == "Blind") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Site, TW, Modality), 
+          wid = .(Subject))
+
+ANOVA_RT_median_sighted <- rt_data_all %>% 
+    filter(Group == "Sighted") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Site, TW, Modality), 
+          wid = .(Subject))
+
+
+#MEAN
+ANOVA_RT_mean_blind <- rt_data_all %>% 
+    filter(Group == "Blind") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_mean), 
+          within = .c(Site, TW, Modality), 
+          wid = .(Subject))
+
+ANOVA_RT_mean_sighted <- rt_data_all %>% 
+    filter(Group == "Sighted") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_mean), 
+          within = .c(Site, TW, Modality), 
+          wid = .(Subject))
+
+```
+
+RT ANOVA post-hoc T tests
+
+```{r}
+
+## ---------- PAIRWISE COMPARISONS (T TESTS) AFTER ANOVA ---------
+
+## TMS EFFECTS / WITHIN MODALITY COMPARISONS
+Ts_RT_TW_bonf <- rt_data_all %>% 
+   group_by(Group, Site, Modality) %>% 
+   #t_test(RT_median ~ TW, paired = TRUE, 
+    t_test(RT_mean ~ TW, paired = TRUE, 
+         # p.adjust.method = "bonferroni")
+          p.adjust.method = "none") %>% 
+    mutate(p.adjusted24 = p * 24)
+
+
+Ts_RT_TW_log_bonf <- rt_data_all %>% 
+   group_by(Group, Site, Modality) %>% 
+   t_test(RT_log_median ~ TW, paired = TRUE, p.adjust.method = "bonferroni")
+
+ 
+## GROUP COMPARISONS
+Ts_RT_group <- rt_tms_effects %>% 
+   group_by(Site, Modality,TW) %>% 
+   #summarise() %>% 
+   t_test(RT_median_TMS_effect ~ Group, paired = FALSE) %>% 
+   adjust_pvalue(method = "BH") %>%
+   add_significance()
+
+# SITE COMPARISONS
+ Ts_RT_Site <- rt_tms_effects %>% 
+   group_by(Group, TW, Modality) %>% 
+   #summarise() %>% 
+   t_test(RT_median_TMS_effect ~ Site, paired = TRUE) %>% 
+   adjust_pvalue(method = "BH") %>%
+   add_significance()
+ 
+ # MODALITY COMPARISONS
+ Ts_RT_Modality <- rt_tms_effects %>% 
+   group_by(Group, Site, TW) %>% 
+   #summarise() %>% 
+   t_test(RT_median_TMS_effect ~ Modality, paired = TRUE) %>% 
+   adjust_pvalue(method = "BH") %>%
+   add_significance()
+```
+
+LEXICALITY EXPLORATIONS!
+
+RT ANOVAS: Lexicality?
+
+```{r}
+#Run separate analyses for modalities and groups (as a follow-up to previous analyses) and look for TW x Lex x Site interactions? 
+
+
+
+ANOVA_Lex_all <- rt_data_lex %>% 
+      ezANOVA(
+      data = ., 
+      dv = .(RT_median), 
+      within = .c(Lex, Site, TW, Modality), 
+      wid = .(Subject),
+      between = .(Group)
+  )
+
+ANOVA_Lex_blind <- rt_data_lex %>% 
+    filter(Group == "Blind") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Lex, Site, TW, Modality), 
+          wid = .(Subject))
+
+ANOVA_Lex_sighted <- rt_data_lex %>% 
+    filter(Group == "Sighted") %>% 
+      ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Lex, Site, TW, Modality), 
+          wid = .(Subject))
+
+ANOVA_Lex_reading <- rt_data_lex %>% 
+    filter(Modality == "read") %>% 
+    ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Lex, Site, TW), 
+          wid = .(Subject),
+          between = .(Group))
+
+ANOVA_Lex_speech <- rt_data_lex %>% 
+    filter(Modality == "speech") %>% 
+    ezANOVA(
+          data = ., 
+          dv = .(RT_median), 
+          within = .c(Lex, Site, TW), 
+          wid = .(Subject),
+          between = .(Group))
+```
+
+LMER
+
+```{r}
+#binomial glmer with binary accuracy
+
+raw_data_correct$Site <- as.factor(raw_data_correct$Site)
+raw_data_correct$TW <- as.factor(raw_data_correct$TW)
+raw_data_correct$Lex <- as.factor(raw_data_correct$Lex)
+raw_data_correct$Group <- as.factor(raw_data_correct$Group)
+raw_data_correct$Modality <- as.factor(raw_data_correct$Modality)
+raw_data_correct$Letters <- as.factor(raw_data_correct$Letters)
+
+rt.glm.blind <- raw_data_correct %>% 
+    filter(Group == "Blind") %>% 
+    lmer(RT ~ Modality * Site * TW + (1|Subject),
+                  data = .)
+summary(rt.glm.blind)
+anova(rt.glm.blind, type = "III")
+
+## RT GLM FOR BLIND
+rt.glm.blind.lex <- raw_data_correct %>% 
+    filter(Group == "Blind") %>% 
+    lmer(RT ~ Modality * Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+anova(rt.glm.blind.lex, type = "III")
+
+
+## EMMEANS for BLIND make no sense, SEs equal in reading and speech, compute modality-specific models for proper EMMEANS
+
+
+## RT GLM FOR BLIND: MODALITY-SPECIFIC
+rt.glm.blind.lex.read <- raw_data_correct %>% 
+    filter(Group == "Blind" & Modality == "read") %>% 
+        #filter(Group == "Blind" & Modality == "read" & Subject!= "Blind_6") %>% 
+    lmer(RT ~ Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+anova(rt.glm.blind.lex.read, type = "III")
+## EMMEANS: READING
+# INTERACTIONS
+rt.glm.blind.lex.read.EMMS <- emmeans(rt.glm.blind.lex.read, 
+                                                 list(pairwise ~Site*TW), 
+                                                 adjust = "none")
+
+rt.glm.blind.lex.read.EMMS.list <-list(
+    "emmeans" = data.frame(summary(rt.glm.blind.lex.read.EMMS[["emmeans of Site, TW"]])),
+    "comp" = data.frame(summary(rt.glm.blind.lex.read.EMMS[["pairwise differences of Site, TW"]][c(2, 4, 6, 15, 17,24, 9, 11, 13, 20, 22, 27)]))) 
+
+## Add "planned bonferroni" = p*6
+rt.glm.blind.lex.read.EMMS.list[["comp"]] <- rt.glm.blind.lex.read.EMMS.list[["comp"]] %>% 
+     mutate(p.adjusted_6 = p.value * 6) %>% 
+     mutate(p.adjusted_12 = p.value * 12) %>% 
+     mutate(p.adjusted_24 = p.value * 24) 
+
+
+## EMMEANS: SPEECH
+rt.glm.blind.lex.speech <- raw_data_correct %>% 
+    #filter(Group == "Blind" & Modality == "speech") %>% 
+    filter(Group == "Blind" & Modality == "speech" & Subject!= "Blind_6") %>% 
+    lmer(RT ~ Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+anova(rt.glm.blind.lex.speech, type = "III")
+
+rt.glm.blind.lex.speech.EMMS <- emmeans(rt.glm.blind.lex.speech, 
+                                                 list(pairwise ~Site*TW), 
+                                                 adjust = "none")
+
+rt.glm.blind.lex.speech.EMMS.list <-list(
+    "emmeans" = data.frame(summary(rt.glm.blind.lex.speech.EMMS[["emmeans of Site, TW"]])),
+    "comp" = data.frame(summary(rt.glm.blind.lex.speech.EMMS[["pairwise differences of Site, TW"]][c(2, 4, 6, 15, 17,24, 9, 11, 13, 20, 22, 27)]))) 
+
+## Add "planned bonferroni" = p*6
+rt.glm.blind.lex.speech.EMMS.list[["comp"]] <- 
+    rt.glm.blind.lex.speech.EMMS.list[["comp"]] %>% 
+     #mutate(p.adjusted_6 = p.value * 6) %>% 
+     #mutate(p.adjusted_12 = p.value * 12) %>% 
+     mutate(p.adjusted_24 = p.value * 24)
+
+## RT GLM FOR SIGHTED 
+rt.glm.sighted.lex <- raw_data_correct %>% 
+    filter(Group == "Sighted") %>% 
+    lmer(RT ~ Modality * Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+## RT GLM FOR SIGHTED: MODALITY-SPECIFIC
+rt.glm.sighted.lex.read <- raw_data_correct %>% 
+    #filter(Group == "Sighted" & Modality == "read") %>% 
+    filter(Group == "Sighted" & Modality == "read" & Subject != "Sighted_11") %>% 
+    lmer(RT ~ Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+rt.glm.sig.lex.read.EMMS <- emmeans(rt.glm.sighted.lex.read, 
+                                                 list(pairwise ~Site*TW), 
+                                                 adjust = "none")
+
+rt.glm.sig.lex.read.EMMS.list <-list(
+    "emmeans" = data.frame(summary(rt.glm.sig.lex.read.EMMS[["emmeans of Site, TW"]])),
+    "comp" = data.frame(summary(rt.glm.sig.lex.read.EMMS[["pairwise differences of Site, TW"]][c(2, 4, 6, 15, 17,24, 9, 11, 13, 20, 22, 27)]))) 
+
+## Add "planned bonferroni" = p*24
+rt.glm.sig.lex.read.EMMS.list[["comp"]] <- rt.glm.sig.lex.read.EMMS.list[["comp"]] %>% 
+     #mutate(p.adjusted_6 = p.value * 6) %>% 
+     #mutate(p.adjusted_12 = p.value * 12) %>% 
+     mutate(p.adjusted_24 = p.value * 24)
+
+
+
+rt.glm.sighted.lex.speech <- raw_data_correct %>% 
+    filter(Group == "Sighted" & Modality == "speech") %>% 
+    lmer(RT ~ Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+
+
+anova(rt.glm.sighted.lex.read, type = "III")
+anova(rt.glm.sighted.lex.speech, type = "III")
+
+## RT GLM FOR BIG 4-WAY INTERACTION
+rt.glm.full <- lmer(RT ~ Group * Modality * Site * TW + Lex + (1|Letters) + (1|Subject),
+                  data = raw_data_correct)
+anova(rt.glm.full, type = "III")
+```

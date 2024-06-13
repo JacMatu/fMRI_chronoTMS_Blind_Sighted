@@ -1,0 +1,92 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_TMS_intensities"
+author: "Jacek Matuszewski"
+date: '2022-04-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r load packages, include = FALSE, message = FALSE}
+#run instal.packages() for each package below if you don't have them installed
+library(tidyverse)
+library(rstatix)
+library(lubridate)
+library(stringr)
+```
+
+
+## Introduction
+
+
+## Analyses 
+# 1. TMS parameters: MNI coordinates & TMS intensity
+This part loads MNI (X, Y, Z) coordinates for each subject in each stimulation site (namely: early visual cortex and visual word form area) and compares group means between sighted and blind subjects to test the homogenity of stimulation locations.
+
+Since TMS experiments were performed in native space to increaese the specificity by accounting for individual differences in neuroanatomy, each subject was first registered to the standard MNI space in BrainSight neuronavigation softwere. This resulted in coordinates shifted from native to common space loaded from file (TMS_prelu_MNI_coordinates.csv). 
+
+Plots for individual and group average coordinates were already perfomed with niilearn.
+
+```{r Load coodrinates, include=TRUE, message = FALSE}
+#Import the csv file with coordinates and motor thresholds
+#where is this repo installed? 
+dir <- '/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted'
+
+MNI_coords <- read.csv(paste(dir, 'data', 'TMS_MNI_coordinates.csv', sep = '/'), header = TRUE, sep = ",", dec = ".", stringsAsFactors = FALSE)
+
+MNI_coords$Group <- as.factor(MNI_coords$Group)
+colnames(MNI_coords) <- c("Sub_ID", "Group", "Site", "X", "Y", "Z", "MT100", "MT110")
+```
+
+Group differences between MNI coordinates (X, Y, Z) for two stimulated sites: 
+- Early Visual Cortex (EVC)
+- Visual Word Form Area (VWFA)
+Caluclated with two-sample T tests. 
+```{r T tests for coordinates, include = TRUE}
+#Check group differences in TMS site coordinates [Two-sample T tests]
+TMS_MNI_tests <- MNI_coords %>% 
+  dplyr::select(Group, Site, X, Y, Z) %>% 
+  pivot_longer(-c(Group, Site), names_to = "variables", values_to= "coordinate") %>%  
+  group_by(Site, variables) %>% 
+  #summarise() %>% 
+  t_test(coordinate~Group) %>% 
+  adjust_pvalue(method = "BH") %>%
+  add_significance()
+
+MNI_coords_summary <- MNI_coords %>% 
+    dplyr::select(Group, Site, X, Y, Z) %>% 
+    pivot_longer(-c(Group, Site), names_to = "MNI_coordinate", values_to= "coordinate_value") %>%  
+    group_by(Site, Group, MNI_coordinate) %>% 
+    summarise(mean = mean(coordinate_value),sd = sd(coordinate_value), 
+              sem = sd(coordinate_value)/sqrt(length(coordinate_value)))
+
+TMS_MNI_tests
+```
+
+Check summaries and group differences in TMS intensity (based on motor threshold)
+```{r TMS intensities, include = TRUE}
+#Check summaries and group differences in TMS intensity (Motor Threshold, MT100)
+TMS_intensities <- MNI_coords %>%
+  na.omit() %>%
+  dplyr::select(Group, MT100) %>% 
+  group_by(Group) %>%
+  summarise(mean_MT = mean(MT100), sd_MT = sd(MT100), min_MT = min(MT100), max_MT = max(MT100)) 
+  
+TMS_intensities 
+
+TMS_intens_t_test <- MNI_coords %>%
+  drop_na() %>% 
+  dplyr::select(Group, MT100) %>% 
+  t_test(MT100~Group) %>%
+  add_significance()
+
+TMS_intens_t_test
+
+#Cleanup if these data won't be used anymore
+rm(MNI_coords)
+```
+
+
+

@@ -1,0 +1,647 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_TMS_RT"
+author: "Jacek Matuszewski"
+date: '2022-08-16'
+output: html_document
+---
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load packages, echo=, message=FALSE, warning=FALSE}
+#library(plotly)
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+library(jtools)
+library(tidyverse)
+library(stringr)
+library(nlme)
+library(marginaleffects)
+library(emmeans)
+library(RColorBrewer)
+```
+
+WORKFLOW FOR THIS SCRIPT:
+
+1.  Load the libraries
+2.  Load the raw (preprocessed) data and select only CORRECT responses for RT analyses
+3.  Exclude the tired subject (Sighted_11)
+4.  Specify 4 types of linear models:
+    1.  GROUP-SPECIFIC model including both sensory modalities to test for TW x Site x Modality interaction, no follow-up EMMEANS analyses
+
+    2.  Two GROUP-MODALITY-SPECIFIC models including only one sensory modality to test for TW x Site interaction.
+
+    3.  BIG GROUP-SITE-TW-MODALITY NLME model to test for a 4-way interaction [only to show lack of it], no follow-up EMMEANS analyses? [varident group\*modality]
+5.  RUN THE EMMEANS / AVG PREDICTED analyses to test for:
+    1.  TMS effects (comparisons to ctrl time window) [emmeans]
+
+    2.  Temporal specificity (comparisons across other time windows within site/modality) [emmeans]
+
+    3.  Differences across SITES - comparisons of the magnitude of TMS effects across sites [exploratory, marginal effects pck]
+6.  RUN THE EMMEANS / AVG PREDICTED analyses to test for LEXICALITY EFFECTS (main effect of lexicality vs interactions?)
+    1.  Either plot one big contrast across groups for each modality as an intro OR
+
+    2.  Use summarized individual predicted values (by subject) for "CPP Plots"
+
+
+
+```{r Load preprocessed data, echo=}
+#Requires running TMS_MNI_and_preproc.Rmd first
+#rm(list=ls())
+#load("~/Documents/Preludium_JM_roboczo/Data/TMS_preprocessed_data.RData")
+
+dir <- '/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted'
+
+load(paste(dir, 'data', 'TMS', 'TMS_preprocessed_data.RData', sep = '/'))
+
+raw_data_all <- rbind(blind_raw_data, sighted_raw_data)
+raw_data_correct <- raw_data_all %>% 
+    filter(Accuracy == "hit" & Subject != "Sighted_11")
+ 
+#Recode to factors for modelling
+raw_data_correct$Site <- as.factor(raw_data_correct$Site)
+raw_data_correct$TW <- as.factor(raw_data_correct$TW)
+raw_data_correct$Lex <- as.factor(raw_data_correct$Lex)
+raw_data_correct$Group <- as.factor(raw_data_correct$Group)
+raw_data_correct$Modality <- as.factor(raw_data_correct$Modality)
+raw_data_correct$Letters <- as.factor(raw_data_correct$Letters)
+
+#smol clean-up
+rm(blind_accuracy_data, sighted_accuracy_data,
+   blind_rt_data, sighted_rt_data,
+   blind_raw_data, sighted_raw_data, raw_data_all,
+   blind_percent_trimmed, sighted_percent_trimmed, 
+   tms_preproc)
+
+```
+
+---------- MAIN ANALYSES ----------
+
+
+LMER: BLIND TW x MODALITY x SITE INTERACTION
+
+```{r}
+
+## RT GLM FOR BLIND
+#null model
+rt.glm.blind.null <- raw_data_correct %>% 
+    filter(Group == "Blind") %>% 
+    lmer(RT ~ (1|Subject),
+                  data = .)
+
+#full model
+rt.glm.blind.lex <- raw_data_correct %>% 
+    filter(Group == "Blind") %>% 
+    lmer(RT ~ Modality * Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+#Anova: null vs full
+anova(rt.glm.blind.null, rt.glm.blind.lex) #base, can only compare 2 models
+
+#Anova: full model
+anova(rt.glm.blind.lex, type = "III", ddf="Satterthwaite") #quick estimation
+#anova(rt.glm.blind.lex, type = "III", ddf="Kenward-Roger") #long computation
+#stats::anova(rt.glm.blind.lex)
+#car::Anova(rt.glm.blind.lex, type = 3)
+
+```
+
+LMER: BLIND READING + EMMEANS
+
+```{r}
+## EMMEANS for BLIND make no sense, SEs equal in reading and speech, compute modality-specific models for proper EMMEANS
+
+
+## RT GLM FOR BLIND: MODALITY-SPECIFIC
+rt.glm.blind.lex.read <- raw_data_correct %>% 
+    filter(Group == "Blind" & Modality == "read") %>% 
+        #filter(Group == "Blind" & Modality == "read" & Subject!= "Blind_6") %>% 
+    lmer(RT ~ Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+
+
+#anova(rt.glm.blind.lex.read, type = "III")
+
+
+## EMMEANS: READING
+
+#INTERACTIONS: contrasts between TIME WINDWOWS by Site (EVC, VWFA separately)
+rt.glm.blind.read.emmeans <-  data.frame(summary(emmeans(rt.glm.blind.lex.read,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                 adjust = "none")$contrast))
+
+
+```
+
+LMER: BLIND SPEECH + EMMEANS
+
+```{r}
+## EMMEANS: SPEECH
+rt.glm.blind.lex.speech <- raw_data_correct %>% 
+    filter(Group == "Blind" & Modality == "speech") %>% 
+    lmer(RT ~ Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+#anova(rt.glm.blind.lex.speech, type = "III")
+
+## EMMEANS: SPEECH
+
+#INTERACTIONS: contrasts between TIME WINDWOWS by Site (EVC, VWFA separately)
+rt.glm.blind.speech.emmeans <-  data.frame(summary(emmeans(rt.glm.blind.lex.speech,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                 adjust = "none")$contrast))
+```
+
+LMER: SIGHTED TW x MODALITY x SITE INTERACTION
+
+```{r}
+
+## RT GLM FOR SIGHTED 
+
+rt.glm.sighted.null <- raw_data_correct %>% 
+    filter(Group == "Sighted") %>% 
+    lmer(RT ~  (1|Subject),
+                  data = .)
+
+
+rt.glm.sighted.lex <- raw_data_correct %>% 
+    filter(Group == "Sighted") %>% 
+    lmer(RT ~ Modality * Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+#anova null vs full
+anova(rt.glm.sighted.null, rt.glm.sighted.lex)
+
+anova(rt.glm.sighted.lex, type = "III")
+#car::Anova(rt.glm.blind.lex, type = 3)
+
+```
+
+LMER: SIGHTED READING + EMMEANS
+
+```{r}
+## RT GLM FOR SIGHTED: MODALITY-SPECIFIC
+rt.glm.sighted.lex.read <- raw_data_correct %>% 
+    #filter(Group == "Sighted" & Modality == "read") %>% 
+    filter(Group == "Sighted" & Modality == "read" & Subject != "Sighted_11") %>% 
+    lmer(RT ~ Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+anova(rt.glm.sighted.lex.read, type = "III")
+
+## EMMEANS: READ
+
+#INTERACTIONS: contrasts between TIME WINDWOWS by Site (EVC, VWFA separately)
+rt.glm.sighted.read.emmeans <-  data.frame(summary(emmeans(rt.glm.sighted.lex.read,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                 adjust = "none")$contrast))
+```
+
+LMER: SIGHTED SPEECH + EMMEANS
+
+```{r}
+rt.glm.sighted.lex.speech <- raw_data_correct %>% 
+    filter(Group == "Sighted" & Modality == "speech") %>% 
+    lmer(RT ~ Site * TW * Lex + (1|Letters) + (1|Subject),
+                  data = .)
+
+anova(rt.glm.sighted.lex.speech, type = "III")
+
+## EMMEANS: SPEECH
+
+#INTERACTIONS: contrasts between TIME WINDWOWS by Site (EVC, VWFA separately)
+rt.glm.sighted.speech.emmeans <-  data.frame(summary(emmeans(rt.glm.sighted.lex.speech,
+                                                  pairwise ~Site*TW,
+                                                  by = "Site",
+                                                 adjust = "none")$contrast))
+
+```
+
+JOIN ALL TIME COMPS IN ONE DF + ADD BONFERRONI & METADATA
+
+```{r}
+
+## GATHER EMMEANS DATA + add info about modalities, groups and sig with bonf corrections within each group
+
+df.rt.contrasts.time <- 
+        rbind(rt.glm.blind.read.emmeans, rt.glm.blind.speech.emmeans,
+              rt.glm.sighted.read.emmeans, rt.glm.sighted.speech.emmeans) %>% 
+        mutate(Group = rep(c("Blind", "Sighted"), each = 24)) %>%
+        mutate(Modality = rep(c("read", "speech"), each = 12, times = 2)) %>% 
+        mutate(estimate_inv = estimate * (-1)) %>% 
+        mutate(p_adj24 = p.value*24) %>%
+        mutate(p_signif = 
+                   ifelse(p_adj24 < 0.001, "***", 
+                      ifelse(p_adj24 < 0.01, "**", 
+                             ifelse(p_adj24 < 0.05, "*",
+                                    ifelse(p_adj24<0.1, "t", "ns"))))) %>% 
+        dplyr::select(Group, Modality, Site, contrast, estimate_inv, everything())
+
+#rm(list = ls(pattern = "*.emmeans"))
+```
+
+LMER: BIG 4-WAY INTERACTION (with lexicality controlled, only check GROUP x SITE x TIME)
+
+```{r}
+## RT GLM FOR BIG 4-WAY INTERACTION
+# rt.glm.full <- lmer(RT ~ Group * Modality * Site * TW + Lex + (1|Letters) + (1|Subject),
+#                   data = raw_data_correct)
+
+
+rt.lme.full <- raw_data_correct %>% 
+     nlme::lme(RT ~ Group * Modality * Site * TW +Lex,
+                     random = list(~ 1 | Subject,
+                                   ~ 1 | Letters),
+                    weights = varIdent(form = ~1|Group*Modality),
+                     data= .)
+
+
+#anova(rt.lme.full, type = "III")
+car::Anova(rt.lme.full, type = "III")
+```
+
+
+DIFFERENCES BETWEEN SITES (in TMS effects to keep TMS side effects controlled)
+Endproduct: rt_site_contrasts_df
+
+```{r}
+## differences in differences? eg. comparing (V1 early - ctrl) - (VWFA early - ctrl) to control side effects and baseline RT differences?
+# ONLY INTERESTNIG IS ROW 1 - 2 (early TMS effect across sites) ROW 3-4 (mid) & late (5-6)
+## NO MULTIPLE COMP CORRECTIONS ARE DONE HERE
+site_contrasts_bl.rd <- comparisons(
+    rt.glm.blind.lex.read,
+    variables = "TW",
+    newdata = datagrid(Site = c("EVC", "VWFA")),
+    hypothesis = "pairwise")[c(1,10,15), ] 
+    
+
+site_contrasts_bl.sp <- comparisons(
+    rt.glm.blind.lex.speech,
+    variables = "TW",
+    newdata = datagrid(Site = c("EVC", "VWFA")),
+    hypothesis = "pairwise")[c(1,10,15), ] 
+
+site_contrasts_si.rd <- comparisons(
+    rt.glm.sighted.lex.read,
+    variables = "TW",
+    newdata = datagrid(Site = c("EVC", "VWFA")),
+    hypothesis = "pairwise")[c(1,10,15), ]
+
+
+site_contrasts_si.sp <- comparisons(
+    rt.glm.sighted.lex.speech,
+    variables = "TW",
+    newdata = datagrid(Site = c("EVC", "VWFA")),
+    hypothesis = "pairwise")[c(1,10,15), ] 
+
+## JOIN DFs and add metadata + bonferroni corrections
+df.rt.contrasts.site <- rbind(site_contrasts_bl.rd, site_contrasts_bl.sp, 
+                           site_contrasts_si.rd, site_contrasts_si.sp) %>% 
+    mutate(comp = recode(term, "Row 1 - Row 2" = "Eearly TMS effect EVC - VWFA",
+                         "Row 3 - Row 4" = "Mid TMS effect EVC - VWFA", 
+                         "Row 5 - Row 6" = "Late TMS effect EVC - VWFA")) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 6)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 3, times = 2)) %>% 
+    mutate(p.adjust3 = p.value*3) %>% 
+    mutate(p.adjust12 = p.value*12) %>% 
+    dplyr::select(Group, Modality, everything())
+
+
+#clean up 
+rm(list = ls(pattern = "^site_contrasts_*"))
+```
+
+PREPARE TMS EFFECTS DF FOR PLOTS!
+Endproduct:  df.rt.glm.tms.effects
+```{r}
+#Try to aggregate all groups, sites and modalities for TW - ctrl TW emmeans contrast! 
+
+
+df.rt.glm.tms.effects <- data.frame()
+
+    #BLIND READING
+    bl.rd <- rt.glm.blind.read.emmeans[c(1,2,3,7,8,9), ] %>% 
+        mutate(Group = "Blind") %>% 
+        mutate(Modality = "read") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #BLIND SPEECH
+    bl.sp <- rt.glm.blind.speech.emmeans[c(1,2,3,7,8,9), ] %>% 
+        mutate(Group = "Blind") %>% 
+        mutate(Modality = "speech") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #SIGHTED READ
+    si.rd <- rt.glm.sighted.read.emmeans[c(1,2,3,7,8,9), ] %>% 
+        mutate(Group = "Sighted") %>% 
+        mutate(Modality = "read") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #SIGHTED SPEECH
+    si.sp <- rt.glm.sighted.speech.emmeans[c(1,2,3,7,8,9), ] %>% 
+        mutate(Group = "Sighted") %>% 
+        mutate(Modality = "speech") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    
+    #Bind and flip the effects
+    df.rt.glm.tms.effects <- rbind(bl.rd, bl.sp, si.rd, si.sp) %>% 
+        mutate(estimate = estimate * (-1)) %>% 
+        mutate(t.ratio = t.ratio * (-1)) %>% 
+        mutate(p_adj24 = p.value*24) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj24 < 0.001, "***", 
+                      ifelse(p_adj24 < 0.01, "**", 
+                             ifelse(p_adj24 < 0.05, "*",
+                                    ifelse(p_adj24<0.1, "t", "ns"))))) %>% 
+        dplyr::select(Group, Modality, Site, TW, everything())
+    
+    
+    rm(bl.rd, bl.sp, si.rd, si.sp)
+```
+
+GATHER COMPARISONS BETWEEN OTHER TIME WINDOWS (within each site, group and modality)
+Endproduct: rt.glm.tms.other.TWs
+```{r}
+rt.glm.tms.other.TWs <- data.frame()
+
+    #BLIND READING
+    bl.rd <- rt.glm.blind.read.emmeans[c(4,5,6,10,11,12), ] %>% 
+        mutate(Group = "Blind") %>% 
+        mutate(Modality = "read") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #BLIND SPEECH
+    bl.sp <- rt.glm.blind.speech.emmeans[c(4,5,6,10, 11, 12), ] %>% 
+        mutate(Group = "Blind") %>% 
+        mutate(Modality = "speech") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #SIGHTED READ
+    si.rd <- rt.glm.sighted.read.emmeans[c(4,5,6,10, 11, 12), ] %>% 
+        mutate(Group = "Sighted") %>% 
+        mutate(Modality = "read") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    #SIGHTED SPEECH
+    si.sp <- rt.glm.sighted.speech.emmeans[c(4,5,6,10, 11, 12), ] %>% 
+        mutate(Group = "Sighted") %>% 
+        mutate(Modality = "speech") %>% 
+        mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"),2)) %>% 
+        mutate(Site = rep(c("EVC", "VWFA"), each = 3))
+    
+    
+    #Bind and flip the effects
+    rt.glm.tms.other.TWs <- rbind(bl.rd, bl.sp, si.rd, si.sp) %>% 
+        mutate(estimate = estimate * (-1)) %>% 
+        mutate(t.ratio = t.ratio * (-1)) %>% 
+        dplyr::select(Group, Modality, Site, TW, everything())
+    
+    
+    rm(bl.rd, bl.sp, si.rd, si.sp)
+```
+
+---------- LEXICALITY EFFECTS ----------
+
+MAIN EFFECTS & TIME EFFECTS
+Endproduct: 
+rt_lex_me_comp_df
+rt.glm.lex_time_tms_effects_df
+
+```{r}
+## ---------- MAIN EFFECT OF LEXICALITY: emmeans for plots ----------
+
+## Get the EMMEANS FOR WORDS AND PSEUDOWORDS IN EACH GROUP x MODALITY
+#Easy way to get EMMEANS from summaries ("main effect of lexicality") 
+me_lex_bl.rd <- data.frame(summary(emmeans(rt.glm.blind.lex.read, ~Lex)))
+me_lex_bl.sp <- data.frame(summary(emmeans(rt.glm.blind.lex.speech, ~Lex)))
+me_lex_si.rd <- data.frame(summary(emmeans(rt.glm.sighted.lex.read, ~Lex)))
+me_lex_si.sp <- data.frame(summary(emmeans(rt.glm.sighted.lex.speech, ~Lex)))
+
+
+#Gather main effects (emmeans) to plot beside temporal patters
+df.rt.glm.lex_me <- rbind(me_lex_bl.rd, me_lex_bl.sp, 
+                           me_lex_si.rd, me_lex_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 4)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 2, times = 2)) %>% 
+    dplyr::select(Group, Modality, everything())
+
+
+## GET COMPARISON STATS FOR LEXICALITIES
+comp_lex_bl.rd <- data.frame(summary(emmeans(rt.glm.blind.lex.read,
+                                             pairwise ~Lex)$contrast))
+comp_lex_bl.sp <- data.frame(summary(emmeans(rt.glm.blind.lex.speech,
+                                             pairwise ~Lex)$contrast))
+comp_lex_si.rd <- data.frame(summary(emmeans(rt.glm.sighted.lex.read,
+                                             pairwise ~Lex)$contrast))
+comp_lex_si.sp <- data.frame(summary(emmeans(rt.glm.sighted.lex.speech,
+                                             pairwise ~Lex)$contrast))
+
+
+df.rt_lex_me_comp <- rbind(comp_lex_bl.rd, comp_lex_bl.sp, 
+                           comp_lex_si.rd, comp_lex_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 2)) %>% 
+    mutate(Modality = rep(c("read", "speech"), times = 2)) %>% 
+    dplyr::select(Group, Modality, everything())
+
+## ---------- LEXICALITY OVER TIME: emmeans for plots ----------
+
+#Get the temporal patters for qualitative assesment (contrasts to ctrl across groups and modalities for words and pseudowords separately)
+
+##BLIND
+#READ
+time_lex_bl.rd <- 
+    data.frame(summary(emmeans(rt.glm.blind.lex.read,
+                               pairwise ~Site*TW*Lex,
+                               by = c("Site", "Lex"),
+                               adjust = "none")$contrast))
+
+#SPEECH
+time_lex_bl.sp <- 
+    data.frame(summary(emmeans(rt.glm.blind.lex.speech,
+                               pairwise ~Site*TW*Lex,
+                               by = c("Site", "Lex"),
+                               adjust = "none")$contrast))
+
+
+## SIGHTED
+# READ
+time_lex_si.rd <- 
+    data.frame(summary(emmeans(rt.glm.sighted.lex.read,
+                               pairwise ~Site*TW*Lex,
+                               by = c("Site", "Lex"),
+                               adjust = "none")$contrast))
+
+# SPEECH
+time_lex_si.sp <- 
+    data.frame(summary(emmeans(rt.glm.sighted.lex.speech,
+                               pairwise ~Site*TW*Lex,
+                               by = c("Site", "Lex"),
+                               adjust = "none")$contrast))
+
+
+# JOIN THE DF
+df.lex_time_comp <- rbind(time_lex_bl.rd, time_lex_bl.sp, time_lex_si.rd, time_lex_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 48)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 24, times = 2)) %>% 
+    mutate(estimate_inv = estimate* (-1)) %>% 
+    mutate(p_adj24 = p.value*24) %>% 
+    mutate(p_signif24 = 
+                   ifelse(p_adj24 < 0.001, "***", 
+                      ifelse(p_adj24 < 0.01, "**", 
+                             ifelse(p_adj24 < 0.05, "*",
+                                    ifelse(p_adj24<0.1, "t", "ns"))))) %>% 
+    mutate(p_adj48 = p.value*48) %>% 
+    mutate(p_signif48 = 
+                   ifelse(p_adj48 < 0.001, "***", 
+                      ifelse(p_adj48 < 0.01, "**", 
+                             ifelse(p_adj48 < 0.05, "*",
+                                    ifelse(p_adj48<0.1, "t", "ns"))))) %>% 
+    dplyr::select(Group, Modality, everything())
+
+df.rt.glm.lex_time_tms_effects <- df.lex_time_comp %>% 
+    dplyr::arrange(contrast) %>% 
+    dplyr::slice(1:48) %>% 
+    mutate(estimate = estimate_inv) %>%
+    mutate(contrast = (gsub("ctrlTMS - ", "", contrast))) %>% 
+    dplyr::select(-estimate_inv)
+
+
+#clean up
+rm(list = ls(pattern = "^time_lex*"))
+rm(list = ls(pattern = "^me_lex*"))
+rm(list = ls(pattern = "^comp_lex*"))
+```
+
+LEXICALITY: words vs pseudowords [TMS effects magnitude]
+Endproduct: lex_word_pseudo_comp_df
+```{r}
+# COMPARE THE MAGNITUDE OF TMS EFFECTS (TW - CTRL TW between words and pseudowords in each TW/SITE, eg. EVC EARLY TMS - CTRL TMS: WORDS - PSEUDO)
+
+# Try to extract pairs of TW - CONTROL TW [words vs pseudo]
+
+
+# c <- avg_comparisons(rt.glm.blind.lex.read,
+#     variables = "TW",
+#     by = c("Site", "Lex"))
+
+# Extract only relevant rows
+word_pseudo_bl.rd <- avg_comparisons(rt.glm.blind.lex.read,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+word_pseudo_bl.sp <- avg_comparisons(rt.glm.blind.lex.speech,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+word_pseudo_si.rd <- avg_comparisons(rt.glm.sighted.lex.read,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+word_pseudo_si.sp <- avg_comparisons(rt.glm.sighted.lex.speech,
+    variables = "TW",
+    by = c("Lex", "Site"),
+    hypothesis = "pairwise")[c(c(1, 39, 61, 22, 52, 66)), ]
+
+# JOIN THE DFs 
+df.lex_word_pseudo_comp <- rbind(word_pseudo_bl.rd, word_pseudo_bl.sp, 
+                            word_pseudo_si.rd, word_pseudo_si.sp) %>% 
+    mutate(Group = rep(c("Blind", "Sighted"), each = 12)) %>% 
+    mutate(Modality = rep(c("read", "speech"), each = 6, times = 2)) %>% 
+    mutate(Site = rep(c("EVC", "VWFA"), each = 3, times = 4)) %>% 
+    mutate(TW = rep(c("earlyTMS", "midTMS", "lateTMS"), times = 8)) %>% 
+    mutate(p_adj24 = p.value*24) %>% 
+    mutate(p_signif = 
+                   ifelse(p_adj24 < 0.001, "***", 
+                      ifelse(p_adj24 < 0.01, "**", 
+                             ifelse(p_adj24 < 0.05, "*",
+                                    ifelse(p_adj24<0.1, "t", "ns"))))) %>% 
+    dplyr::select(Group, Modality, Site, TW, everything())
+
+rm(list = ls(pattern = "^word_pseudo*"))
+
+```
+
+LINEAR CONTRASTS WITH EMMEANS 
+https://marginaleffects.com/articles/hypothesis.html#complex-contrast
+
+Linear contrasts for reading and speech
+```{r}
+#em <- emmeans(mod, "carb")
+#lc <- data.frame(custom_contrast = c(-2, 1, 1, 0, -1, 1))
+#contrast(em, method = lc)
+
+#Define linear increase contrast
+lc <- data.frame(custom_contrast = c(-3,-1,1,3))
+
+#Get emmeans from each GLM
+emmeans.blind.read <- emmeans(rt.glm.blind.lex.read, ~Site*TW,  by = "Site")
+emmeans.blind.speech <- emmeans(rt.glm.blind.lex.speech, ~Site*TW, by = "Site")
+emmeans.sighted.read <- emmeans(rt.glm.sighted.lex.read, ~Site*TW,  by = "Site")
+emmeans.sighted.speech <- emmeans(rt.glm.sighted.lex.speech, ~Site*TW, by = "Site")
+
+#Test the linear contrasts
+contrast(emmeans.blind.read, method = lc)
+contrast(emmeans.blind.speech, method = lc)
+contrast(emmeans.sighted.read, method = lc)
+contrast(emmeans.sighted.speech, method = lc)
+```
+
+Linear contrasts for LEXICALITY
+```{r}
+#em <- emmeans(mod, "carb")
+#lc <- data.frame(custom_contrast = c(-2, 1, 1, 0, -1, 1))
+#contrast(em, method = lc)
+
+#Define linear increase contrast
+lc <- data.frame(custom_contrast = c(-3,-1,1,3))
+
+#Get emmeans from each GLM
+emmeans.blind.read.lex <- emmeans(rt.glm.blind.lex.read, ~Site*TW,  by = c("Site", "Lex"))
+emmeans.blind.speech.lex <- emmeans(rt.glm.blind.lex.speech, ~Site*TW, by = c("Site", "Lex"))
+emmeans.sighted.read.lex <- emmeans(rt.glm.sighted.lex.read, ~Site*TW, by = c("Site", "Lex"))
+emmeans.sighted.speech.lex <- emmeans(rt.glm.sighted.lex.speech, ~Site*TW, by = c("Site", "Lex"))
+
+#Test the linear contrasts
+# MULTIPLY P VALUES x 4 for multiple comparisons! 
+contrast(emmeans.blind.read.lex, method = lc)
+contrast(emmeans.blind.speech.lex, method = lc)
+contrast(emmeans.sighted.read.lex, method = lc)
+contrast(emmeans.sighted.speech.lex, method = lc)
+```
+
+
+---------- SAVE DATA FOR PLOTS ----------
+
+GLM plots require following data frames: 
+- df.rt.glm.tms.effects
+- df.rt.glm.lex_time_tms_effects
+- df.rt.glm.lex_me
+
+```{r}
+#load("~/Documents/Preludium_JM_roboczo/Data/TMS_preprocessed_data_test.RData")
+
+save(df.rt.glm.tms.effects, df.rt.glm.lex_time_tms_effects, df.rt.glm.lex_me, 
+     file = paste(dir, 'data', 'TMS','GLM_RT_plot_data.RData', sep = '/'))
+```
+
+CLEAN-UP?
+```{r}
+rm(list = ls(pattern = "*.emmeans"))
+```
+

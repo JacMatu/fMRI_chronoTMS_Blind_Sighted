@@ -1,0 +1,777 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_PLOTS"
+author: "Jacek Matuszewski"
+date: '2022-08-16'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE, 
+                      message = FALSE, 
+                      results = 'hide')
+```
+
+```{r load packages, echo=, message=FALSE, warning=FALSE}
+#library(plotly)
+library(tidyverse)
+library(ggsignif)
+library(cowplot)
+library(RColorBrewer)
+library(patchwork)
+library(ggpubr)
+```
+
+---------- MAIN PLOTTING FUNCTIONS --------- 
+```{r}
+dir <- "/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted"
+
+source(paste(dir, 'code', 'functions_plots.R', sep = '/'))
+
+```
+
+
+# --------------- BEHAVIOURAL PLOTS ---------------
+
+Load the data and prepare the dataframes
+
+```{r}
+
+#Read the data
+mri_behav <- read.csv(paste(dir, 'data', 'fMRI', 'MRI_behav.csv', sep ='/'))
+
+#Prepare the data frame for reading speed
+df.beh.reading <- mri_behav %>% 
+    dplyr::select(subject, group = Group, speed_words, speed_pseudo) %>% 
+    pivot_longer(cols = speed_words:speed_pseudo, 
+                 names_to = "lexicality", 
+                 values_to = "speed") %>% 
+    mutate(lexicality = sub("speed_", "", lexicality, ignore.case = TRUE)) %>%
+    mutate(lexicality = gsub("pseudo", "pseudowords", lexicality)) %>% 
+    mutate(lexicality = sub("(.)", "\\U\\1", lexicality, perl=TRUE))
+
+#Prepare the data frame for 1-back task
+df.beh.task <- mri_behav %>% 
+    dplyr::select(-speed_words, -speed_pseudo, 
+           group = Group, 
+           Speech_Words = d_prime_speech_words,
+           Speech_Pseudowords = d_prime_speech_pseudowords,
+           Speech_Control = d_prime_speech_ctrl,
+           Reading_Words = d_prime_read_words,
+           Reading_Pseudowords = d_prime_read_pseudowords,
+           Reading_Control = d_prime_read_ctrl) %>% 
+    pivot_longer(cols = Speech_Words:Reading_Control, 
+                 names_sep = "_",
+                 names_to = c("modality", "condition"),
+                 values_to = "d_prime")
+
+#smol clean up
+rm(mri_behav)
+```
+
+PLOT BEH: READING SPEED
+
+```{r}
+#PLOT WITH FUNCTION
+plot.beh.reading.speed <- beh_reading_speed_points(data = df.beh.reading)
+```
+
+PLOT BEH: fMRI 1-back task
+
+```{r}
+## POINTS WITH MEAN
+plot.beh.fmri.task.rd <- beh_task_points(df.beh.task, mod = "Reading")
+plot.beh.fmri.task.sp <- beh_task_points(df.beh.task, mod = "Speech")
+
+#COMBINE & CLEAN
+plot.beh.fmri.task.grid <- plot.beh.fmri.task.rd + plot.beh.fmri.task.sp
+
+rm(plot.beh.fmri.task.rd, plot.beh.fmri.task.sp)
+```
+
+
+
+# --------------- fMRI ROI PLOTS ---------------
+
+Load the data
+```{r}
+#Load the data
+
+load(paste(dir, 'data', 'fMRI', 'ROI_data.RData', sep = '/'))
+    
+#Prepare a longer version of the DF to be filtered in functions
+df.fmri.roi <- rois_long %>% 
+    dplyr::select(-c(V1_bilateral, visf_pOTS, visf_IOS)) %>% 
+    pivot_longer(names_to = "ROI", 
+                 values_to = "Contrast_Estimate",
+                 cols = c("visf_v1", "VWFA_cohen_5")) %>% 
+    mutate(ROI = recode(ROI, "visf_v1" = "V1",
+                  "VWFA_cohen_5" = "VWFA"))
+
+rm(rois_long)
+```
+
+Plot the data
+
+```{r}
+#PLOT JITTER + MEANS & SEMS (BLACK!)
+plot.fMRI.v1.bl <- fMRI_ROI_points(data = df.fmri.roi, 
+                                 roi = "V1", 
+                                 sub_group = "Blind") + theme(legend.position = "none")
+
+plot.fMRI.v1.si <- fMRI_ROI_points(data = df.fmri.roi,
+                                   roi = "V1", 
+                                   sub_group = "Sighted") + theme(legend.position = "none")
+
+
+plot.fMRI.vwfa.bl <- fMRI_ROI_points(data = df.fmri.roi, 
+                                 roi = "VWFA", 
+                                 sub_group = "Blind") + theme(legend.position = "bottom")
+
+plot.fMRI.vwfa.si  <- fMRI_ROI_points(data = df.fmri.roi,
+                                   roi = "VWFA", 
+                                   sub_group = "Sighted") + theme(legend.position = "bottom")
+
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+#plot.fMRI.grid <- plot.fMRI.v1.bl / plot.fMRI.vwfa.bl  | plot.fMRI.v1.si / plot.fMRI.vwfa.si
+
+#ADDED BIT OF VERTICAL SPACE BETWEEN PANELS FOR STAT SIGNIFICANCE
+plot.fMRI.grid <- plot.fMRI.v1.bl / plot_spacer() / plot.fMRI.vwfa.bl + plot_layout(heights = c(4,1,4)) | plot.fMRI.v1.si / plot_spacer() /plot.fMRI.vwfa.si + plot_layout(heights = c(4,1,4))
+
+rm(plot.fMRI.v1.bl, plot.fMRI.vwfa.bl, plot.fMRI.v1.si, plot.fMRI.vwfa.si)
+```
+
+
+# --------------- TMS PLOTS: GLM DATA ---------------
+## GLM MAIN PLOTS OVER TIME
+GLM DATA: load the DFs
+```{r}
+##Loads DFs for main plots, lexicality across sites and main effects of lexicality
+#RT
+load(paste(dir, 'data', 'TMS', 'GLM_RT_plot_data.RData', sep = '/'))
+#ACCU
+load(paste(dir, 'data', 'TMS', 'GLM_ACCU_plot_data.RData', sep = '/'))
+```
+
+
+PLOTS GLM RT: GROUP x SITE x MODALITY x TIME
+```{r}
+# BLIND: RT EMMEANS
+#Reading
+plot.tms.rt.glm.bl.rd <- tms_line_mod_sep_glm(data = df.rt.glm.tms.effects, 
+                                                   sub_group = "Blind", 
+                                                   metric = "RT", 
+                                                   mod = "read")
+#Speach
+plot.tms.rt.glm.bl.sp <- tms_line_mod_sep_glm(data = df.rt.glm.tms.effects, 
+                                                   sub_group = "Blind", 
+                                                   metric = "RT", 
+                                                   mod = "speech")
+
+# SIGHTED: RT EMMEANS
+#Reading
+plot.tms.rt.glm.si.rd <- tms_line_mod_sep_glm(data = df.rt.glm.tms.effects, 
+                                                   sub_group = "Sighted", 
+                                                   metric = "RT", 
+                                                   mod = "read")
+
+#Speech
+plot.tms.rt.glm.si.sp <- tms_line_mod_sep_glm(data = df.rt.glm.tms.effects, 
+                                                   sub_group = "Sighted", 
+                                                   metric = "RT", 
+                                                   mod = "speech")
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.rt.glm.grid <- plot.tms.rt.glm.bl.rd / plot.tms.rt.glm.bl.sp | plot.tms.rt.glm.si.rd / plot.tms.rt.glm.si.sp
+rm(plot.tms.rt.glm.bl.rd, plot.tms.rt.glm.bl.sp, plot.tms.rt.glm.si.rd, plot.tms.rt.glm.si.sp)
+```
+
+PLOTS GLM ACCU: GROUP x SITE x MODALITY x TIME
+```{r}
+#BLIND: ACCURACY EMMEANS (LOGIT SCALE)
+#Reading
+plot.tms.accu.glm.bl.rd <- tms_line_mod_sep_glm(data = df.accu.glm.tms.effects, 
+                                                   sub_group = "Blind", 
+                                                   metric = "Accuracy", 
+                                                   mod = "read")
+#Speech
+plot.tms.accu.glm.bl.sp <- tms_line_mod_sep_glm(data = df.accu.glm.tms.effects, 
+                                                   sub_group = "Blind", 
+                                                   metric = "Accuracy", 
+                                                   mod = "speech")
+
+#SIGHTED: ACCURACY EMMEANS (LOGIT SCALE)
+#Reading
+plot.tms.accu.glm.si.rd <- tms_line_mod_sep_glm(data = df.accu.glm.tms.effects, 
+                                                   sub_group = "Sighted", 
+                                                   metric = "Accuracy", 
+                                                   mod = "read")
+#Speech
+plot.tms.accu.glm.si.sp <- tms_line_mod_sep_glm(data = df.accu.glm.tms.effects, 
+                                                   sub_group = "Sighted", 
+                                                   metric = "Accuracy", 
+                                                   mod = "speech")
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.accu.glm.grid <- plot.tms.accu.glm.bl.rd / plot.tms.accu.glm.bl.sp | plot.tms.accu.glm.si.rd / plot.tms.accu.glm.si.sp
+rm(plot.tms.accu.glm.bl.rd, plot.tms.accu.glm.bl.sp, plot.tms.accu.glm.si.rd, plot.tms.accu.glm.si.sp)
+```
+
+
+
+## GLM LEXICALITY: PLOTS OVER TIME
+
+RT GLM: Lexicality over time
+```{r}
+## PLOT  RT ACROSS LEXICALITES
+
+
+# THIS PART HAS BEEN UPDATED IN A PLOTTING FUNCTION
+#prep the df to work with plotting function
+df.rt.glm.lex_time_tms_effects <- df.rt.glm.lex_time_tms_effects %>%
+   # rename(mean = estimate) %>%
+   # rename(sem = SE) %>%
+    rename(TW = contrast)
+
+#Blind: Reading
+plot.tms.rt.glm.lex.time.bl.rd <- tms_line_mod_sep_glm_lex(df.rt.glm.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "read", 
+                                                       metric = "RT")  
+#Blind: Speech
+plot.tms.rt.glm.lex.time.bl.sp <- tms_line_mod_sep_glm_lex(df.rt.glm.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "speech", 
+                                                       metric = "RT")
+#Sighted: Reading
+plot.tms.rt.glm.lex.time.si.rd <- (tms_line_mod_sep_glm_lex(df.rt.glm.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "read", 
+                                                       metric = "RT")+theme(legend.position = "none"))
+#Sighted: Speech
+plot.tms.rt.glm.lex.time.si.sp <- tms_line_mod_sep_glm_lex(df.rt.glm.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "speech", 
+                                                       metric = "RT")
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.rt.glm.lex.time.grid <- plot.tms.rt.glm.lex.time.bl.rd / plot.tms.rt.glm.lex.time.bl.sp | plot.tms.rt.glm.lex.time.si.rd / plot.tms.rt.glm.lex.time.si.sp
+
+rm(plot.tms.rt.glm.lex.time.bl.rd, plot.tms.rt.glm.lex.time.bl.sp, plot.tms.rt.glm.lex.time.si.rd, plot.tms.rt.glm.lex.time.si.sp)
+```
+
+ACCU GLM: Lexicality over time
+```{r}
+## PLOT LOGIT ACCURACY ACROSS LEXICALITES
+#Blind: Reading
+plot.tms.accu.glm.lex.time.bl.rd <- tms_line_mod_sep_glm_lex(df.accu.glm.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "read", 
+                                                       metric = "Accuracy") 
+#Blind: Speech
+plot.tms.accu.glm.lex.time.bl.sp <- tms_line_mod_sep_glm_lex(df.accu.glm.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+#Sighted: Reading
+plot.tms.accu.glm.lex.time.si.rd <- tms_line_mod_sep_glm_lex(df.accu.glm.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "read", 
+                                                       metric = "Accuracy")  
+#Sighted: Speech
+plot.tms.accu.glm.lex.time.si.sp <- tms_line_mod_sep_glm_lex(df.accu.glm.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.accu.glm.lex.time.grid <- plot.tms.accu.glm.lex.time.bl.rd / plot.tms.accu.glm.lex.time.bl.sp | plot.tms.accu.glm.lex.time.si.rd / plot.tms.accu.glm.lex.time.si.sp
+rm(plot.tms.accu.glm.lex.time.bl.rd, plot.tms.accu.glm.lex.time.bl.sp, plot.tms.accu.glm.lex.time.si.rd, plot.tms.accu.glm.lex.time.si.sp)
+```
+
+
+
+
+## GLM LEXICALITY: MAIN EFFECT OF LEX
+RT GLM: Lex ME
+```{r}
+# PLOT EMMEANS for words and pseudowords (across modalities and groups )
+#Blind: reading
+plot.tms.rt.glm.lex.me.bl.rd <- tms_main_effects_lex(data = df.rt.glm.lex_me, 
+                                          sub_group = "Blind", 
+                                          mod = "read")
+#Blind: speech
+plot.tms.rt.glm.lex.me.bl.sp <- tms_main_effects_lex(data = df.rt.glm.lex_me, 
+                                          sub_group = "Blind", 
+                                          mod = "speech")
+
+#Sighted: reading
+plot.tms.rt.glm.lex.me.si.rd<- tms_main_effects_lex(data = df.rt.glm.lex_me, 
+                                          sub_group = "Sighted", 
+                                          mod = "read")
+#Sighted: speech
+plot.tms.rt.glm.lex.me.si.sp <- tms_main_effects_lex(data = df.rt.glm.lex_me, 
+                                          sub_group = "Sighted", 
+                                          mod = "speech")
+
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.rt.glm.lex.me.grid <- plot.tms.rt.glm.lex.me.bl.rd / plot.tms.rt.glm.lex.me.bl.sp | plot.tms.rt.glm.lex.me.si.rd / plot.tms.rt.glm.lex.me.si.sp
+rm(plot.tms.rt.glm.lex.me.bl.rd, plot.tms.rt.glm.lex.me.bl.sp, plot.tms.rt.glm.lex.me.si.rd, plot.tms.rt.glm.lex.me.si.sp)
+
+```
+
+ACCU GLM: Lex ME
+```{r}
+# PLOT EMMEANS for words and pseudowords (main effects)
+# Accuracy plots require tweaking due to scale differences
+
+#Blind: reading
+plot.tms.accu.glm.lex.me.bl.rd <- tms_main_effects_lex(data = df.accu.glm.lex_me, 
+                                          sub_group = "Blind", 
+                                          mod = "read") + 
+    ylab("Accuracy [logit]") +
+    scale_y_continuous(limits = c(2.4, 4.1))
+
+#Blind: speech
+plot.tms.accu.glm.lex.me.bl.sp <- tms_main_effects_lex(data = df.accu.glm.lex_me, 
+                                          sub_group = "Blind", 
+                                          mod = "speech") + 
+    ylab("Accuracy [logit]") +
+    scale_y_continuous(limits = c(2.4, 4.1))
+
+#Sighted: reading
+plot.tms.accu.glm.lex.me.si.rd <- tms_main_effects_lex(data = df.accu.glm.lex_me, 
+                                          sub_group = "Sighted", 
+                                          mod = "read") + 
+    ylab("Accuracy [logit]") +
+    scale_y_continuous(limits = c(2.4, 4.1))
+
+#Sighted: speech
+plot.tms.accu.glm.lex.me.si.sp <- tms_main_effects_lex(data = df.accu.glm.lex_me, 
+                                          sub_group = "Sighted", 
+                                          mod = "speech") + 
+    ylab("Accuracy [logit]") +
+    scale_y_continuous(limits = c(2.4, 4.1))
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.accu.glm.lex.me.grid <- plot.tms.accu.glm.lex.me.bl.rd / plot.tms.accu.glm.lex.me.bl.sp | plot.tms.accu.glm.lex.me.si.rd / plot.tms.accu.glm.lex.me.si.sp
+rm(plot.tms.accu.glm.lex.me.bl.rd, plot.tms.accu.glm.lex.me.bl.sp, plot.tms.accu.glm.lex.me.si.rd, plot.tms.accu.glm.lex.me.si.sp)
+```
+
+
+
+
+
+
+
+# --------------- TMS PLOTS: RAW DATA --------------- 
+## DF PREPARATION & CLEAN-UP
+
+Load and wrangle the DFs for raw data
+```{r}
+load(paste(dir, 'data', 'TMS', 'TMS_preprocessed_data.RData', sep = '/'))
+
+## ---------- Raw data, bound across groups (all trials) ----------
+raw_data_all <- rbind(blind_raw_data, sighted_raw_data) %>% 
+     filter(Subject != "Sighted_11") %>% 
+     mutate(Accuracy_01 = recode (Accuracy, 
+                              "hit" = 1, 
+                              "incorrect" = 0,
+                              "miss" = 0))
+
+
+```
+
+RAW RT MAIN DF 
+```{r}
+## ---------- RAW RTs: MEANS ---------- 
+
+rt_data_all <- rbind(blind_rt_data, sighted_rt_data) %>% 
+        filter(Subject != "Sighted_11")
+
+## TMS effects for each subject!  
+rt_tms_effects <- rt_data_all %>% 
+     group_by(Subject, Site, Modality) %>% 
+     #compute TMS effects for each subject * condition
+     mutate(RT_mean_TMS_effect = RT_mean-RT_mean[TW=="ctrlTMS"]) %>%
+     filter(TW != "ctrlTMS") %>%
+     dplyr::select(Subject, Group, Site, Modality, TW, RT_mean_TMS_effect)
+    
+df.rt.raw.tms.effects <- rt_tms_effects %>% 
+     group_by(Group, Site, Modality, TW) %>% 
+     dplyr::summarize(mean = mean(RT_mean_TMS_effect), 
+                      sem = sd(RT_mean_TMS_effect)/sqrt(25))
+
+
+```
+
+
+RAW RT LEX DF
+```{r}
+## ---------- RAW RTs: LEXICALITY MEANS --------- 
+#Prepare the DATA FRAMES
+rt_data_lex <- raw_data_all %>% 
+    filter(Accuracy == "hit") %>% 
+    mutate(Lex = factor(Lex, levels = c("word", "pseudo"))) %>% 
+    group_by(Subject, Group, Site, Modality, TW, Lex) %>% 
+    summarise(RT_mean = mean(RT))
+
+## TMS effects for each subject!  
+rt_tms_effects_lex <- rt_data_lex %>% 
+     group_by(Subject, Site, Modality, Lex) %>% 
+     #compute TMS effects for each subject * condition
+     mutate(RT_mean_TMS_effect = RT_mean-RT_mean[TW=="ctrlTMS"]) %>%
+     filter(TW != "ctrlTMS") %>%
+     dplyr::select(Subject, Group, Site, Modality, TW, Lex, 
+                   RT_mean_TMS_effect)
+
+ #Summaries for median RTs
+df.rt.raw.lex_time_tms_effects <- rt_tms_effects_lex %>% 
+     group_by(Group, Site, Modality, TW, Lex) %>% 
+     dplyr::summarize(mean = mean(RT_mean_TMS_effect), 
+                      sem = sd(RT_mean_TMS_effect)/sqrt(25))
+
+```
+
+
+RAW ACCU MAIN DF
+```{r}
+## ---------- "RAW" ACCURACIES ---------- 
+
+# For "raw" plots and interpretable values (vs log odds ratio)
+accu_data_all <- rbind(blind_accuracy_data, sighted_accuracy_data) %>%
+    filter(Subject != "Sighted_11") %>%
+    mutate(Error_rate = 1 - Accuracy_score)
+
+
+accu_tms_effects <- accu_data_all %>%
+      mutate(Error_rate = (1 - Accuracy_score) * 100) %>%
+      group_by(Subject, Site, Modality) %>%
+      #compute TMS effects for each subject * condition
+      mutate(Accuracy_TMS_effect = Accuracy_score-Accuracy_score[TW == "ctrlTMS"]) %>%
+      #mutate(Error_rate_TMS_effect = Error_rate-Error_rate[TW == "ctrlTMS"]) %>%
+      filter(TW != "ctrlTMS")
+
+# Create summaries with % (* 100)
+df.accu.raw.tms.effects <- accu_tms_effects %>%
+    group_by(Group, Site, Modality, TW) %>%
+    dplyr::summarise(mean = mean(Accuracy_TMS_effect) * 100,
+                     sem = (sd(Accuracy_TMS_effect)/sqrt(25)) * 100)
+
+rm(accu_tms_effects, accu_data_all)
+```
+
+RAW ACCU LEX DF
+```{r}
+## --------- "RAW" ACCURACIES: LEXICALITY EFFECTS --------- 
+
+accu_data_lex <- raw_data_all %>%
+    filter(Subject != "Sighted_11") %>% 
+    mutate(Lex = factor(Lex, levels = c("word", "pseudo"))) %>% 
+    group_by(Subject, Group, Site, Modality, TW, Lex) %>% 
+    summarise(Accuracy_score = sum(Accuracy_01)/10)
+              
+## TMS effects for each subject!  
+ accu_tms_effects_lex <- accu_data_lex %>% 
+     group_by(Subject, Site, Modality, Lex) %>% 
+     #compute TMS effects for each subject * condition
+     mutate(Accu_TMS_effect = Accuracy_score-Accuracy_score[TW=="ctrlTMS"]) %>%
+     filter(TW != "ctrlTMS") %>%
+     dplyr::select(Subject, Group, Site, Modality, TW, Lex, Accu_TMS_effect)
+
+ 
+#Summaries for ACCURACY RATES
+df.accu.raw.lex_time_tms_effects <- accu_tms_effects_lex %>% 
+     group_by(Group, Site, Modality, TW, Lex) %>% 
+     dplyr::summarize(mean = mean(Accu_TMS_effect) * 100, 
+                      sem = sd(Accu_TMS_effect)/sqrt(25) * 100)
+ 
+ rm(accu_data_lex, accu_tms_effects_lex)
+```
+
+CLEAN UP
+```{r}
+#smol clean-up
+rm(blind_accuracy_data, sighted_accuracy_data,
+   blind_rt_data, sighted_rt_data,
+   blind_raw_data, sighted_raw_data, 
+   tms_preproc, blind_percent_trimmed, 
+   sighted_percent_trimmed, raw_data_all, 
+   rt_data_all, rt_data_lex, rt_tms_effects,
+   rt_tms_effects_lex)
+```
+
+
+RT: mean + SE (TMS effects)
+```{r}
+## COMPARE THAT TO RAW PLOTS (MEAN + SE)
+plot.tms.rt.raw.bl.rd <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects, 
+                                        sub_group = "Blind",
+                                        metric = "RT",
+                                        mod = "read")  
+
+plot.tms.rt.raw.bl.sp <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects, 
+                                        sub_group = "Blind",
+                                        metric = "RT",
+                                        mod = "speech")
+
+plot.tms.rt.raw.si.rd <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects, 
+                                        sub_group = "Sighted",
+                                        metric = "RT", 
+                                        mod = "read") 
+
+plot.tms.rt.raw.si.sp <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects, 
+                                        sub_group = "Sighted",
+                                        metric = "RT",
+                                        mod = "speech")
+```
+
+Accuracy: Accuracy rates (TMS effects)
+```{r}
+## COMPARE THAT TO RAW PLOTS (ACCURACY RATE, NOT ERRORS)
+plot.tms.accu.raw.bl.rd <- tms_line_mod_sep_raw(data = df.accu.raw.tms.effects, 
+                                        sub_group = "Blind",
+                                        metric = "Accuracy",
+                                        mod = "read") 
+
+plot.tms.accu.raw.bl.sp <- tms_line_mod_sep_raw(data = df.accu.raw.tms.effects, 
+                                        sub_group = "Blind",
+                                        metric = "Accuracy",
+                                        mod = "speech")
+
+plot.tms.accu.raw.si.rd <- tms_line_mod_sep_raw(data = df.accu.raw.tms.effects, 
+                                        sub_group = "Sighted",
+                                        metric = "Accuracy",
+                                        mod = "read") 
+
+plot.tms.accu.raw.si.sp <- tms_line_mod_sep_raw(data = df.accu.raw.tms.effects, 
+                                        sub_group = "Sighted",
+                                        metric = "Accuracy",
+                                        mod = "speech")
+```
+
+
+## RAW MAIN PLOTS OVER TIME 
+RT: mean + SE (TMS effects)
+```{r}
+#RAW OBSERVED RT PLOTS: MEAN + SE # SEPARATE_MODALITIES ONE COLOR
+#Blind: reading
+plot.tms.rt.raw.bl.rd  <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects,
+                                       sub_group = "Blind", 
+                                       metric = "RT", 
+                                       mod = "read")
+#Blind: speech
+plot.tms.rt.raw.bl.sp  <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects,
+                                       sub_group = "Blind", 
+                                       metric = "RT", 
+                                       mod = "speech")
+#Sighted: reading
+plot.tms.rt.raw.si.rd  <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects,
+                                       sub_group = "Sighted", 
+                                       metric = "RT", 
+                                       mod = "read")
+#Sighted: speech
+plot.tms.rt.raw.si.sp  <- tms_line_mod_sep_raw(data = df.rt.raw.tms.effects,
+                                       sub_group = "Sighted", 
+                                       metric = "RT", 
+                                       mod = "speech")
+
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.rt.raw.grid <- plot.tms.rt.raw.bl.rd / plot.tms.rt.raw.bl.sp | plot.tms.rt.raw.si.rd / plot.tms.rt.raw.si.sp
+rm(plot.tms.rt.raw.bl.rd, plot.tms.rt.raw.bl.sp, plot.tms.rt.raw.si.rd, plot.tms.rt.raw.si.sp)
+
+```
+
+
+Accuracy: Accuracy rates (TMS effects)
+```{r}
+#RAW ACCURACY RATES TMS EFFECTS (% CORRECT)
+#Blind: reading
+plot.tms.accu.raw.bl.rd <- tms_line_mod_sep_raw(df.accu.raw.tms.effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "read", 
+                                                       metric = "Accuracy")
+#Blind: speech
+plot.tms.accu.raw.bl.sp <- tms_line_mod_sep_raw(df.accu.raw.tms.effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+#Sighted reading
+plot.tms.accu.raw.si.rd<- tms_line_mod_sep_raw(df.accu.raw.tms.effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "read", 
+                                                       metric = "Accuracy")
+#Sighted:speech
+plot.tms.accu.raw.si.sp <- tms_line_mod_sep_raw(df.accu.raw.tms.effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.accu.raw.grid <- plot.tms.accu.raw.bl.rd / plot.tms.accu.raw.bl.sp | plot.tms.accu.raw.si.rd / plot.tms.accu.raw.si.sp
+rm(plot.tms.accu.raw.bl.rd, plot.tms.accu.raw.bl.sp, plot.tms.accu.raw.si.rd, plot.tms.accu.raw.si.sp)
+```
+
+
+## RAW LEXICALITY: PLOTS OVER TIME
+RT: mean + SE x LEX (TMS effects)
+```{r}
+#Blind: reading
+plot.tms.rt.raw.lex.time.bl.rd <- tms_line_mod_sep_raw_lex(df.rt.raw.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "read", 
+                                                       metric = "RT")  + theme(legend.position = "none")
+#Blind: speech
+plot.tms.rt.raw.lex.time.bl.sp <- tms_line_mod_sep_raw_lex(df.rt.raw.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "speech", 
+                                                       metric = "RT")
+#Sighted: reading
+plot.tms.rt.raw.lex.time.si.rd <- tms_line_mod_sep_raw_lex(df.rt.raw.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "read", 
+                                                       metric = "RT")  
+#Sighted: speech
+plot.tms.rt.raw.lex.time.si.sp <- tms_line_mod_sep_raw_lex(df.rt.raw.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "speech", 
+                                                       metric = "RT")
+
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.rt.raw.lex.time.grid <- plot.tms.rt.raw.lex.time.bl.rd / plot.tms.rt.raw.lex.time.bl.sp | plot.tms.rt.raw.lex.time.si.rd / plot.tms.rt.raw.lex.time.si.sp
+rm(plot.tms.rt.raw.lex.time.bl.rd, plot.tms.rt.raw.lex.time.bl.sp, plot.tms.rt.raw.lex.time.si.rd, plot.tms.rt.raw.lex.time.si.sp)
+```
+
+Accuracy rates x LEX (TMS effects)
+```{r}
+plot.tms.accu.raw.lex.time.bl.rd <- tms_line_mod_sep_raw_lex(df.accu.raw.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "read", 
+                                                       metric = "Accuracy") 
+
+plot.tms.accu.raw.lex.time.bl.sp <- tms_line_mod_sep_raw_lex(df.accu.raw.lex_time_tms_effects, 
+                                                       sub_group = "Blind",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+
+plot.tms.accu.raw.lex.time.si.rd <- tms_line_mod_sep_raw_lex(df.accu.raw.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "read", 
+                                                       metric = "Accuracy") 
+
+plot.tms.accu.raw.lex.time.si.sp <- tms_line_mod_sep_raw_lex(df.accu.raw.lex_time_tms_effects,
+                                                       sub_group = "Sighted",
+                                                       mod = "speech", 
+                                                       metric = "Accuracy")
+
+#COMBINE INTO A 2-by-2 GRID AND CLEAN UP PARTIAL PLOTS
+plot.tms.accu.raw.lex.time.grid <- plot.tms.accu.raw.lex.time.bl.rd / plot.tms.accu.raw.lex.time.bl.sp | plot.tms.accu.raw.lex.time.si.rd / plot.tms.accu.raw.lex.time.si.sp
+rm(plot.tms.accu.raw.lex.time.bl.rd, plot.tms.accu.raw.lex.time.bl.sp, plot.tms.accu.raw.lex.time.si.rd, plot.tms.accu.raw.lex.time.si.sp)
+```
+
+
+
+# ---------- SAVE ALL PLOTS ----------
+Couple of scaling / dimensions options are needed for different kinds of plots
+1. Beh: reading speed
+2. Beh: task 
+3. fMRI: ROI
+4. TMS: big grids
+5. TMS: me lex
+
+## BEH & fMRI PLOTS
+```{r}
+fig_dir <- "/Users/jacekmatuszewski/Library/CloudStorage/OneDrive-UCL/manuscript_TMS_Blind_Sighted/draft/R_figures/"
+
+#Overrride the ggsave function to use white bg
+ggsave <- function(..., bg = 'white') ggplot2::ggsave(..., bg = bg)
+
+## HOW TO LIST ALL GGPLOTS IN ENV
+#ggplot_list <- Filter(function(x) is(x, "ggplot"), mget(ls()))
+
+## HOW TO LIST GGPLOTS IN ENV BASED ON NAME PATTERN
+#ggplot_behlist <- Filter(function(x) is(x, "ggplot"), mget(ls(pattern = "^plot.beh*")))
+
+
+#READING SPEED
+ ggsave(filename = paste0(fig_dir, "plot.beh.reading.speed.tiff"),
+                plot = plot.beh.reading.speed,
+                units = "px",
+                height = 500,
+                width = 600,
+                dpi = 300,
+                scale = 3.5)
+
+#fMRI TASK PERFORMANCE
+  ggsave(filename = paste0(fig_dir, "plot.beh.fmri.task.grid.tiff"),
+                plot = plot.beh.fmri.task.grid,
+                units = "px",
+                height = 400,
+                width = 1400,
+                dpi = 300,
+                scale = 3.5)
+
+  
+#fMRI ROIs DATA
+    ggsave(filename = paste0(fig_dir, "plot.fmri.roi.grid.tiff"),
+                plot = plot.fMRI.grid,
+                units = "px",
+                height = 1000,
+                width = 1600,
+                dpi = 300,
+                scale = 3.2)
+  
+```
+
+## TMS PLOTS
+```{r}
+#Plots DIR
+fig_dir <- paste(dir, 'plots', sep = '/')
+dir.create(fig_dir)
+
+#Overrride the ggsave function to use white bg
+ggsave <- function(..., bg = 'white') ggplot2::ggsave(..., bg = bg)
+
+#List TMS grid plots
+ggplot_tms_grid_list <- Filter(function(x) is(x, "ggplot"), mget(ls(pattern = "^plot.tms.*.grid")))
+tms_grid_plot_list <- ls(pattern = "^plot.tms.*.grid")
+
+#Loop across main grids
+for(i in seq_along(ggplot_tms_grid_list)) {
+
+        ggsave(filename = paste0(fig_dir, tms_grid_plot_list[i], ".tiff"),
+               plot = ggplot_tms_grid_list[[i]],
+               units = "px",
+               height = 1000,
+               width = 2000,
+               dpi = 300,
+               scale = 3.2)
+}
+
+#List TMS ME plots
+ggplot_tms_me_list <- Filter(function(x) is(x, "ggplot"), mget(ls(pattern = "*.lex.me.grid")))
+tms_me_plot_list <- ls(pattern = "*.lex.me.grid")
+
+#Loop across me plots, overrride previous ones! 
+for(i in seq_along(ggplot_tms_me_list)) {
+
+        ggsave(filename = paste0(fig_dir, tms_me_plot_list[i], ".tiff"),
+               plot = ggplot_tms_me_list[[i]],
+               units = "px",
+               height = 800,
+               width = 1000,
+               dpi = 300,
+               scale = 3.2)
+}
+```
+
+DONE? 
+```{r}
+print("DONE WITHOUT ERRORS, HAVE A COOKIE")
+```
+

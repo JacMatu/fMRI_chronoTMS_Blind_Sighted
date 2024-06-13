@@ -1,0 +1,97 @@
+---
+title: "Blind_Sighted_Language_TMS"
+author: "Jacek Matuszewski"
+date: '2022-04-05'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r load packages, include = FALSE, message = FALSE}
+#run instal.packages() for each package below if you don't have them installed
+library(tidyverse)
+library(rstatix)
+library(lubridate)
+library(stringr)
+```
+
+Load and preprocess BLIND and SIGHTED logs to data frames with tms_preproc function 
+
+```{r Loading files & creating proper data frames: BLIND (tms_preproc function), message=FALSE, warning=FALSE}
+rm(list = ls())
+
+#where is this repo?
+dir <- "/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted"
+data_path <- paste(dir, 'data', 'TMS', sep = '/')
+
+#load the function
+source(paste(dir, 'code', 'functions_preproc.R', sep = '/'))
+
+#prepare empty DFs in the global environment so the function can return its values
+blind_accuracy_data <- NULL
+blind_rt_data <- NULL
+blind_raw_data <- NULL
+
+#Run the function 
+#default sd trimming = 2.5 SD
+#default = whole group (all logs), add exclusion argument if needed
+
+tms_preproc("blind", data_path)
+
+```
+
+```{r Loading files & creating proper data frames: SIGHTED (tms_preproc function)}
+
+#where is this repo?
+dir <- "/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted"
+data_path <- paste(dir, 'data', 'TMS', sep = '/')
+
+#load the function
+source(paste(dir, 'code', 'functions_preproc.R', sep = '/'))
+
+#prepare empty DFs in the global environment so the function can return its values
+sighted_accuracy_data <- NULL
+sighted_rt_data <- NULL
+sighted_raw_data <- NULL
+
+#Run the function 
+#default sd trimming = 2.5 SD
+#default = whole group (all logs), add exclusion argument if needed
+
+tms_preproc("sighted", data_path)
+
+```
+
+
+```{r Check the trimming %, include = FALSE}
+#What % of trials in the blind group was trimmed? Compare expected perfect data frame size to the real one
+
+n_TMS_cond <- 4
+n_modalities <- 2
+n_sites <- 2
+n_sub_bl <- 13 #FINAL group size
+n_sub_sig <- 12 #FINAL group size
+n_trials <- 20
+
+# 0 trimmed, perfect screnario [with full group should == 4160]
+blind_expected <- n_TMS_cond * n_modalities * n_sites * n_sub_bl * n_trials 
+sighted_expected <- n_TMS_cond * n_modalities * n_sites * n_sub_sig * n_trials 
+#calculate % trimmed
+blind_percent_trimmed <- 
+  100 - (length(blind_raw_data$Subject)/blind_expected * 100)
+
+sighted_percent_trimmed <-
+  100 - (length(sighted_raw_data$Subject)/sighted_expected * 100)
+
+#clean up
+rm(n_TMS_cond, n_modalities, n_sites, n_sub_bl, n_sub_sig, n_trials, blind_expected, sighted_expected)
+```
+
+
+```{r Save data, echo = FALSE}
+
+save.image(paste(dir, 'data', 'TMS', 'TMS_preprocessed_data.RData', sep = '/'))
+```
+

@@ -1,0 +1,276 @@
+---
+title: "fMRI_chronoTMS_Blind_Sighted_fMRI_ROIs"
+author: "Jacek Matuszewski"
+date: '2022-09-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Packages, echo = FALSE, message=FALSE}
+library(tidyverse)
+library(stringr)
+library(plotly)
+library(rstatix)
+library(ez)
+library(cowplot)
+library(RColorBrewer)
+library(patchwork)
+
+```
+
+
+Main path to source csv files
+```{r path}
+#where did you install the repo?
+dir <- "/Users/jacekmatuszewski/Documents/GitHub/fMRI_chronoTMS_Blind_Sighted"
+main_path <- paste(dir, 'data', 'fMRI', sep = '/')
+```
+
+Read ROIs, create integrated data frame 
+```{r Old ROIs}
+#read ROIS from Anatomy + VWFA canonical
+VWFA_ROIs_long <- read.csv(paste(main_path, "fMRI_ROI_VWFA.csv", sep = '/'), header = TRUE, dec = ",", sep = ";")
+
+#read ROIs from visf
+visf_v1 <- read.csv(paste(main_path, "fMRI_ROI_V1.csv", sep = '/'), header = FALSE, dec = ".", sep = ",")
+colnames(visf_v1) <- c("file", "visf_v1")
+
+rois_long <- cbind(VWFA_ROIs_long, visf_v1[2])
+
+#clean up
+rm(VWFA_ROIs_long, visf_v1)
+```
+
+
+Wrangle the ROI DF (recode, extract Subject code, etc)
+```{r DF Wrangling}
+
+rois_long <- rois_long %>% 
+    mutate(Subject = str_split(File, "\\\\", simplify = TRUE)[,4]) %>% 
+    select(-File) %>% 
+    mutate(Subject = gsub("sub-", "", Subject)) %>% 
+    separate(Condition_label, into = c("Modality", "Condition"), sep = "_") %>% 
+    mutate(Group = recode(Group, '1'= "Blind", '2' = "Sighted")) %>% 
+    mutate(Modality = recode(Modality, 'Read'= "Reading")) %>% 
+    mutate(Condition = sub("(.)", "\\U\\1", Condition, perl=TRUE)) %>% 
+    mutate(Condition = recode(Condition, "Pseudo"= "Pseudowords")) %>% 
+    select(Subject, Group, Modality, Condition,  VWFA_cohen_5, visf_v1)
+```
+
+2(group) x 2(modality) x 3(condition) ANOVAS
+V1: ANOVAS & post-hocs
+```{r ANOVAS}
+# ------------ STATISTICS ---------------
+v1_anova <- ezANOVA(
+     data = rois_long,
+     dv = .(visf_v1),
+     wid = .(Subject),
+     within = .c(Modality, Condition),
+     between = .(Group), 
+     type = 3, 
+     detailed = TRUE
+)
+#v1_anova
+
+v1_post_hoc_1 <- rois_long %>% 
+  group_by(Group, Modality) %>% 
+        t_test(visf_v1~Condition, paired = TRUE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni for planned comparisons (3 x 2 x 2 model)
+        rename(grouping_variable=Group) %>% 
+        mutate(p_signif = 
+                  ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, Modality, everything(), -p.adj, -p.adj.signif)
+   
+v1_post_hoc_2 <- rois_long %>% 
+  group_by(Modality, Condition) %>% 
+        t_test(visf_v1~Group, paired = FALSE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni for planned comparisons (3 x 2 x 2 model)
+        rename(grouping_variable=Condition) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, Modality, everything())
+
+v1_post_hoc_3 <- rois_long %>% 
+  group_by(Group, Condition) %>% 
+        t_test(visf_v1~Modality, paired = TRUE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni for planned comparisons (3 x 2 x 2 model)
+        rename(grouping_variable=Condition) %>% 
+        rename(Modality = Group) %>%  #just to fit other DFs for rbind...
+        mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, everything())
+
+v1_anova_post_hocs <- rbind(v1_post_hoc_1, v1_post_hoc_2, v1_post_hoc_3)
+rm(v1_post_hoc_1, v1_post_hoc_2, v1_post_hoc_3)
+
+
+#try to format the tables? 
+v1_anova_post_hocs_formatted <- v1_anova_post_hocs %>% 
+    mutate(p_adj = as.numeric(p_adj, digits = 3, format = "d")) %>% 
+    mutate(p_adj = round(p_adj, digits = 4)) %>% 
+    mutate(p_adj = ifelse(p_adj > 1, 
+                          0.9999, 
+                          p_adj)) %>% 
+    select(-c(p, n1, n2))
+
+#One sample T tests (vs 0)
+v1_one_sample_Ts <- rois_long %>% 
+    group_by(Group, Modality, Condition) %>% 
+    t_test(visf_v1~0, paired = FALSE) %>% 
+    mutate(p_adj = p*30) %>% 
+    mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns")))))
+
+v1_one_sample_Ts_formatted <- v1_one_sample_Ts %>% 
+    mutate(p_adj = as.numeric(p_adj, digits = 3, format = "d")) %>% 
+    mutate(p_adj = round(p_adj, digits = 4)) %>% 
+    mutate(p_adj = ifelse(p_adj > 1, 
+                          0.9999, 
+                          p_adj))
+```
+
+
+VWFA: ANOVAS & post-hocs
+```{r VWFA STATS}
+
+#----------- STATS VWFA -------------
+
+#ANOVA 3 x 2 x 2
+VWFA_anova <- ezANOVA(
+     data = rois_long,
+     dv = .(VWFA_cohen_5),
+     wid = .(Subject),
+     within = .c(Modality, Condition),
+     between = .(Group), 
+     type = 3, 
+     detailed = TRUE
+)
+
+#POST-HOC TEST
+VWFA_post_hoc_1 <- rois_long %>% 
+  group_by(Group, Modality) %>% 
+        t_test(VWFA_cohen_5~Condition, paired = TRUE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni for planned comparisons (3 x 2 x 2 model)
+        rename(grouping_variable=Group) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, Modality, everything(), -p.adj, -p.adj.signif)
+   
+VWFA_post_hoc_2 <- rois_long %>% 
+  group_by(Modality, Condition) %>% 
+        t_test(VWFA_cohen_5~Group, paired = FALSE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni BY HAND (3 x 2 x 2 model)
+        rename(grouping_variable=Condition) %>% 
+        mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, Modality, everything())
+
+VWFA_post_hoc_3 <- rois_long %>% 
+  group_by(Group, Condition) %>% 
+        t_test(VWFA_cohen_5~Modality, paired = TRUE) %>% 
+        mutate(p_adj = p*18) %>% #Bonferoni BY HAND (3 x 2 x 2 model)
+        rename(grouping_variable=Condition) %>% 
+        rename(Modality = Group) %>%  #just to fit other DFs for rbind...
+        mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns"))))) %>% 
+        select(grouping_variable, everything())
+
+VWFA_anova_post_hocs <- rbind(VWFA_post_hoc_1, VWFA_post_hoc_2, VWFA_post_hoc_3)
+rm(VWFA_post_hoc_1, VWFA_post_hoc_2, VWFA_post_hoc_3)
+
+VWFA_anova_post_hocs_formatted <- VWFA_anova_post_hocs %>% 
+    mutate(p_adj = as.numeric(p_adj, digits = 3, format = "d")) %>% 
+    mutate(p_adj = round(p_adj, digits = 4)) %>% 
+    mutate(p_adj = ifelse(p_adj > 1, 
+                          0.9999, 
+                          p_adj)) %>% 
+    select(-c(p, n1, n2))
+
+#One sample T tests (vs 0)
+VWFA_one_sample_Ts <- rois_long %>% 
+    group_by(Group, Modality, Condition) %>% 
+    t_test(VWFA_cohen_5~0, paired = FALSE) %>% 
+    mutate(p_adj = p*30) %>% 
+    mutate(p_signif = 
+                   ifelse(p_adj < 0.001, "***", 
+                      ifelse(p_adj < 0.01, "**", 
+                             ifelse(p_adj < 0.05, "*",
+                                    ifelse(p_adj<0.1, "t", "ns")))))
+
+VWFA_one_sample_Ts_formatted <- VWFA_one_sample_Ts %>% 
+    mutate(p_adj = as.numeric(p_adj, digits = 3, format = "d")) %>% 
+    mutate(p_adj = round(p_adj, digits = 4)) %>% 
+    mutate(p_adj = ifelse(p_adj > 1, 
+                          0.9999, 
+                          p_adj))
+```
+
+
+
+2(ROI) x 2(modality) x 3(condition) ANOVAS for each group
+(Only for within-group interactions!)
+
+BLIND & SIGHTED
+```{r}
+
+roi_interaction_long <- rois_long %>% 
+    pivot_longer(cols = c(V1_bilateral, VWFA_cohen_5), 
+                 values_to = "bold", names_to = "roi")
+
+blind_roi_anova <- roi_interaction_long %>% 
+    filter(Group == "Blind") %>% 
+    ezANOVA(
+     data = .,
+     dv = .(bold),
+     wid = .(Subject),
+     within = .c(Modality, Condition, roi),
+     #between = .(Group), 
+     type = 3, 
+     detailed = TRUE
+)
+
+sighted_roi_anova <- roi_interaction_long %>% 
+    filter(Group == "Sighted") %>% 
+    ezANOVA(
+     data = .,
+     dv = .(bold),
+     wid = .(Subject),
+     within = .c(Modality, Condition, roi),
+     #between = .(Group), 
+     type = 3, 
+     detailed = TRUE
+)
+
+```
+
+
+
+```{r save CLEAN DATA}
+
+save.image(paste(dir, 'data', 'fMRI', 'ROI_stats.RData', sep = '/'))
+save(rois_long, file = paste(dir, 'data', 'fMRI', 'ROI_data.RData', sep = '/'))
+```
