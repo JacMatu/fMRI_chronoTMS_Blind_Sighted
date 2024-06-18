@@ -72,6 +72,36 @@ stripchart(prelu_mri_demo$Education ~ prelu_mri_demo$Group,
 ```
 
 
+
+TMS subset of subjects
+``` {r TMS subset, echo = FALSE}
+prelu_tms_demo_bl <- prelu_mri_demo %>% 
+    filter(Group == 'Blind') %>% 
+    filter(Subject %in% c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 16))
+
+prelu_tms_demo_si <- prelu_mri_demo %>% 
+    filter(Group == 'Sighted') %>% 
+    filter(Subject %in% c(2, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 19, 20))
+
+prelu_tms_demo <- rbind(prelu_tms_demo_bl, prelu_tms_demo_si)
+
+rm(prelu_tms_demo_bl, prelu_tms_demo_si)
+
+#T test education TMS 
+t.test(prelu_tms_demo$Education[prelu_tms_demo$Group=="Blind"], prelu_tms_demo$Education[prelu_tms_demo$Group=="Sighted"])
+
+
+#T test age TMS 
+t.test(prelu_tms_demo$Age[prelu_tms_demo$Group=="Blind"], prelu_tms_demo$Age[prelu_tms_demo$Group=="Sighted"])
+
+#TMS GENDER CHI 
+chisq_test(prelu_tms_demo$Group, prelu_tms_demo$Sex)
+
+#MRI GENDER CHI
+chisq_test(prelu_mri_demo$Group, prelu_mri_demo$Sex)
+```
+
+
 Reading speed (words / pseudowords) via Decoding Test
 ```{r decoding test, echo = FALSE}
 library(tidyverse)
@@ -209,7 +239,7 @@ library(RColorBrewer)
 library(processx)
 
 
-mri_behav <- reac.csv(paste(dir, 'data', 'fMRI', 'MRI_behav.csv', sep ='/'))
+mri_behav <- read.csv(paste(dir, 'data', 'fMRI', 'MRI_behav.csv', sep ='/'))
 
 
 ## ------ LONG FORMAT FOR ANALYSES AND PLOTS ------
